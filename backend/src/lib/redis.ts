@@ -24,5 +24,11 @@ redis.on('error', (err: Error) => {
 
 /** Graceful shutdown — call before process.exit() */
 export async function closeRedis(): Promise<void> {
+  if (redis.status === 'wait' || redis.status === 'end') {
+    // Connection was never opened (or already closed) — nothing to quit
+    redis.disconnect();
+    return;
+  }
+
   await redis.quit();
 }

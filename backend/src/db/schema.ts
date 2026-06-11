@@ -43,15 +43,15 @@ import {
  * drizzle-orm/pg-core exposes `bytea` directly in >=0.30; this
  * customType is a safe fallback for any version.
  */
-export const bytea = customType<{ data: Buffer; driverData: string }>({
+export const bytea = customType<{ data: Buffer; driverData: Buffer }>({
   dataType() {
     return 'bytea';
   },
   toDriver(value: Buffer) {
     return value;
   },
-  fromDriver(value: string) {
-    if (Buffer.isBuffer(value)) return value as unknown as Buffer;
+  fromDriver(value: Buffer) {
+    if (Buffer.isBuffer(value)) return value;
     return Buffer.from(value as unknown as string, 'hex');
   },
 });
