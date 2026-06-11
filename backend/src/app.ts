@@ -10,6 +10,8 @@ import express        from 'express';
 import helmet         from 'helmet';
 import cors           from 'cors';
 import { healthRouter } from './routes/health';
+import { authRouter }   from './routes/v1/auth.router';
+import { errorHandler } from './middleware/errorHandler';
 
 export const app = express();
 
@@ -25,7 +27,13 @@ app.use(express.json({ limit: '256kb' }));
 // Health — intentionally at root (not /v1) so infra probes don't need auth
 app.use('/health', healthRouter);
 
-// All versioned API routes mount here (added in later tasks)
-// app.use('/v1/auth',          authRouter);
+// Versioned API
+app.use('/v1/auth', authRouter);
+
+// Upcoming routes (uncommented as each task lands):
 // app.use('/v1/users',         usersRouter);
 // app.use('/v1/conversations', conversationsRouter);
+// app.use('/v1/memories',      memoriesRouter);
+
+// ── Error handler (must be last) ───────────────────────────────────────────────
+app.use(errorHandler);
