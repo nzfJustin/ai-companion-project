@@ -9,6 +9,7 @@
 import express        from 'express';
 import helmet         from 'helmet';
 import cors           from 'cors';
+import cookieParser   from 'cookie-parser';
 import { healthRouter } from './routes/health';
 import { authRouter }   from './routes/v1/auth.router';
 import { errorHandler } from './middleware/errorHandler';
@@ -19,8 +20,9 @@ export const app = express();
 app.use(helmet());
 app.use(cors());
 
-// ── Body parsing ──────────────────────────────────────────────────────────────
+// ── Body + cookie parsing ─────────────────────────────────────────────────────
 app.use(express.json({ limit: '256kb' }));
+app.use(cookieParser());
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 
