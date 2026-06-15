@@ -1,13 +1,17 @@
 /**
  * src/lib/jwt.ts
  *
- * JWT utilities used by every auth route.
+ * JWT and refresh-token utilities used by every auth route.
  *
  * Algorithm: RS256 (asymmetric — private key signs, public key verifies)
  *
  * Tokens:
  *   Access token  — short-lived JWT (15 min), returned in response body
- *   Refresh token — opaque 64-char hex, stored in DB + HttpOnly cookie
+ *   Refresh token — opaque 64-char hex, sent to the client via HttpOnly
+ *                   cookie. The server stores ONLY sha256(token) in
+ *                   auth_sessions.refresh_token — never the raw value.
+ *                   This means a DB read alone can't be replayed as a
+ *                   valid session (TDD P1-003).
  *
  * Key setup (run once):
  *   openssl genrsa -out private.pem 2048
@@ -17,8 +21,12 @@
  *   JWT_PUBLIC_KEY="$(awk  'NF {sub(/\r/, ""); printf "%s\\n",$0;}' public.pem)"
  */
 
-import jwt                     from 'jsonwebtoken';
-import { randomBytes, randomUUID } from 'node:crypto';
+import jwt from 'jsonwebtoken';
+import {
+  randomBytes,
+  randomUUID,
+  createHash,
+} from 'node:crypto';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -28,8 +36,25 @@ export const ACCESS_TOKEN_TTL_SEC  = 15 * 60;                    // 15 minutes
 /** Refresh token lifetime in milliseconds (cookie maxAge + DB expiresAt). */
 export const REFRESH_TOKEN_TTL_MS  = 30 * 24 * 60 * 60 * 1000;  // 30 days
 
-/** Name of the HttpOnly cookie that carries the refresh token. */
+/** Name of the HttpOnly cookie that carries the raw refresh token. */
 export const REFRESH_COOKIE_NAME   = 'refresh_token';
+
+/** Path the refresh cookie is scoped to — only auth endpoints see it. */
+export const REFRESH_COOKIE_PATH   = '/v1/auth';
+
+/**
+ * Shared cookie options for setting the refresh token.
+ * Pass `{ maxAge }` separately since it differs between "set" and "clear".
+ */
+export function refreshCookieOptions(maxAge: number) {
+  return {
+    httpOnly: true,
+    secure:   process.env.NODE_ENV === 'production',
+    sameSite: 'strict' as const,
+    path:     REFRESH_COOKIE_PATH,
+    maxAge,
+  };
+}
 
 // ─── Payload type ─────────────────────────────────────────────────────────────
 
@@ -62,7 +87,7 @@ export function getJwtPublicKey(): string {
   return normaliseKey(key);
 }
 
-// ─── Token operations ─────────────────────────────────────────────────────────
+// ─── Access token operations ─────────────────────────────────────────────────
 
 /**
  * Signs a short-lived RS256 access token for the given user.
@@ -88,15 +113,34 @@ export function verifyAccessToken(token: string): AccessTokenPayload {
   }) as AccessTokenPayload;
 }
 
+// ─── Refresh token operations ────────────────────────────────────────────────
+
 /**
- * Generates a cryptographically random refresh token and its family UUID.
- *
- * The token is a 64-char hex string stored in auth_sessions.
- * The family UUID ties related tokens together for rotation/reuse detection.
+ * Generates a cryptographically random 64-char hex refresh token.
+ * This is the value sent to the client — never stored directly.
+ */
+export function generateRawToken(): string {
+  return randomBytes(32).toString('hex');
+}
+
+/**
+ * Generates a brand-new refresh token AND a new token family.
+ * Used at login — every login starts a fresh rotation chain.
  */
 export function generateRefreshToken(): { token: string; family: string } {
   return {
-    token:  randomBytes(32).toString('hex'),
+    token:  generateRawToken(),
     family: randomUUID(),
   };
+}
+
+/**
+ * Deterministically hashes a raw refresh token for DB storage/lookup.
+ *
+ * SHA-256 (not bcrypt) is used deliberately: refresh tokens are already
+ * 256 bits of CSPRNG entropy, so a slow KDF adds no security — only
+ * lookup latency. A deterministic hash lets us query by equality.
+ */
+export function hashRefreshToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
 }
