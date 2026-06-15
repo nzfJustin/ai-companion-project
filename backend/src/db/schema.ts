@@ -162,6 +162,11 @@ export const authSessions = pgTable(
     userId:       uuid('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    /**
+     * SHA-256(rawToken) — the raw refresh token is NEVER stored.
+     * See src/lib/jwt.ts hashRefreshToken(). Still unique because SHA-256
+     * collisions are not a practical concern at this scale.
+     */
     refreshToken: text('refresh_token').notNull().unique(),
     /** Token rotation family — reuse of any old token in the family triggers revocation */
     tokenFamily:  text('token_family').notNull(),

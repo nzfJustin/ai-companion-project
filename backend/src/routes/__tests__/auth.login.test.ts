@@ -16,12 +16,24 @@ jest.mock('../../db', () => ({
 
 jest.mock('bcryptjs', () => ({
   __esModule: true,
-  default: { hash: jest.fn(), compare: jest.fn() },
+  default: {
+    hash:    jest.fn().mockResolvedValue('$2b$12$dummyhash'),
+    compare: jest.fn(),
+  },
 }));
 
 jest.mock('../../lib/jwt', () => ({
   signAccessToken:      jest.fn().mockReturnValue('mock.access.token'),
   generateRefreshToken: jest.fn().mockReturnValue({ token: 'mock-refresh-hex', family: 'mock-family-uuid' }),
+  generateRawToken:     jest.fn().mockReturnValue('mock-raw-token-hex'),
+  hashRefreshToken:     jest.fn((t: string) => `hashed(${t})`),
+  refreshCookieOptions: jest.fn((maxAge: number) => ({
+    httpOnly: true,
+    secure:   false,
+    sameSite: 'strict',
+    path:     '/v1/auth',
+    maxAge,
+  })),
   ACCESS_TOKEN_TTL_SEC: 900,
   REFRESH_TOKEN_TTL_MS: 2_592_000_000,
   REFRESH_COOKIE_NAME:  'refresh_token',
@@ -86,7 +98,7 @@ describe('POST /v1/auth/login — success', () => {
   it('sets an HttpOnly refresh_token cookie', async () => {
     setupHappyPath();
     const res = await request(app).post('/v1/auth/login').send(VALID_BODY);
-    const cookies = ([] as string[]).concat(res.headers['set-cookie'] ?? []);
+    const cookies: string[] = (res.headers['set-cookie'] as unknown as string[]) ?? [];
     const rtCookie = cookies.find((c) => c.startsWith('refresh_token='));
     expect(rtCookie).toBeDefined();
     expect(rtCookie).toMatch(/HttpOnly/i);
@@ -95,7 +107,7 @@ describe('POST /v1/auth/login — success', () => {
   it('cookie is scoped to /v1/auth path', async () => {
     setupHappyPath();
     const res = await request(app).post('/v1/auth/login').send(VALID_BODY);
-    const cookies = ([] as string[]).concat(res.headers['set-cookie'] ?? []);
+    const cookies: string[] = (res.headers['set-cookie'] as unknown as string[]) ?? [];
     const rtCookie = cookies.find((c) => c.startsWith('refresh_token='));
     expect(rtCookie).toMatch(/Path=\/v1\/auth/i);
   });
@@ -106,7 +118,7 @@ describe('POST /v1/auth/login — success', () => {
     expect(res.body).not.toHaveProperty('refresh_token');
   });
 
-  it('persists a session row via db.insert', async () => {
+  it('persists a session row containing the HASHED token, not the raw one', async () => {
     setupHappyPath();
     await request(app).post('/v1/auth/login').send(VALID_BODY);
     expect(mockInsert).toHaveBeenCalledTimes(1);
@@ -114,10 +126,18 @@ describe('POST /v1/auth/login — success', () => {
     expect(valuesFn).toHaveBeenCalledWith(
       expect.objectContaining({
         userId:       EXISTING_USER.id,
-        refreshToken: 'mock-refresh-hex',
+        refreshToken: 'hashed(mock-refresh-hex)',
         tokenFamily:  'mock-family-uuid',
       }),
     );
+  });
+
+  it('sets the cookie to the RAW token, not the hash', async () => {
+    setupHappyPath();
+    const res = await request(app).post('/v1/auth/login').send(VALID_BODY);
+    const cookies: string[] = (res.headers['set-cookie'] as unknown as string[]) ?? [];
+    const rtCookie = cookies.find((c) => c.startsWith('refresh_token='));
+    expect(rtCookie).toMatch(/refresh_token=mock-refresh-hex/);
   });
 });
 
@@ -126,6 +146,7 @@ describe('POST /v1/auth/login — success', () => {
 describe('POST /v1/auth/login — invalid credentials', () => {
   it('returns 401 when user does not exist', async () => {
     mockFindFirst.mockResolvedValue(undefined as never);
+    mockCompare.mockResolvedValue(false as never);
     const res = await request(app).post('/v1/auth/login').send(VALID_BODY);
     expect(res.status).toBe(401);
     expect(res.body).toEqual({ error: 'INVALID_CREDENTIALS' });
@@ -144,6 +165,7 @@ describe('POST /v1/auth/login — invalid credentials', () => {
       ...EXISTING_USER,
       deletedAt: new Date(),
     } as never);
+    mockCompare.mockResolvedValue(true as never);
     const res = await request(app).post('/v1/auth/login').send(VALID_BODY);
     expect(res.status).toBe(401);
   });
@@ -151,6 +173,7 @@ describe('POST /v1/auth/login — invalid credentials', () => {
   it('gives same error for wrong email and wrong password (no enumeration)', async () => {
     // Wrong email
     mockFindFirst.mockResolvedValue(undefined as never);
+    mockCompare.mockResolvedValue(false as never);
     const r1 = await request(app).post('/v1/auth/login').send(VALID_BODY);
 
     // Wrong password
@@ -164,8 +187,41 @@ describe('POST /v1/auth/login — invalid credentials', () => {
 
   it('does not call db.insert when credentials are invalid', async () => {
     mockFindFirst.mockResolvedValue(undefined as never);
+    mockCompare.mockResolvedValue(false as never);
     await request(app).post('/v1/auth/login').send(VALID_BODY);
     expect(mockInsert).not.toHaveBeenCalled();
+  });
+});
+
+// ── Timing-safe lookup (TDD P1-002) ───────────────────────────────────────────
+
+describe('POST /v1/auth/login — timing safety', () => {
+  it('calls bcrypt.compare even when the user does not exist', async () => {
+    mockFindFirst.mockResolvedValue(undefined as never);
+    mockCompare.mockResolvedValue(false as never);
+
+    await request(app).post('/v1/auth/login').send(VALID_BODY);
+
+    // The whole point of the dummy-hash fallback: compare is ALWAYS called,
+    // so the response takes ~the same time whether or not the user exists.
+    expect(mockCompare).toHaveBeenCalledTimes(1);
+    expect(mockCompare).toHaveBeenCalledWith(VALID_BODY.password, expect.any(String));
+  });
+
+  it('compares against the precomputed dummy hash when user is missing', async () => {
+    mockFindFirst.mockResolvedValue(undefined as never);
+    mockCompare.mockResolvedValue(false as never);
+
+    await request(app).post('/v1/auth/login').send(VALID_BODY);
+
+    // Dummy hash comes from bcrypt.hash(...) mocked to '$2b$12$dummyhash'
+    expect(mockCompare).toHaveBeenCalledWith(VALID_BODY.password, '$2b$12$dummyhash');
+  });
+
+  it('compares against the real hash when user exists', async () => {
+    setupHappyPath();
+    await request(app).post('/v1/auth/login').send(VALID_BODY);
+    expect(mockCompare).toHaveBeenCalledWith(VALID_BODY.password, EXISTING_USER.passwordHash);
   });
 });
 
