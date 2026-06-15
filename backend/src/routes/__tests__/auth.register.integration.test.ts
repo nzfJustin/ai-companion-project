@@ -14,10 +14,9 @@
 import request   from 'supertest';
 import bcrypt    from 'bcryptjs';
 import { eq }    from 'drizzle-orm';
-import { app }       from '../../app';
-import { db, closeDb } from '../../db';
-import { users }    from '../../db/schema';
-import { closeRedis } from '../../lib/redis';
+import { app }   from '../../app';
+import { db }    from '../../db';
+import { users, userContext } from '../../db/schema';
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -31,8 +30,6 @@ beforeEach(async () => {
 afterAll(async () => {
   // Final cleanup
   await db.delete(users).where(eq(users.email, TEST_EMAIL));
-  await closeDb();
-  await closeRedis();
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -122,5 +119,24 @@ describe('POST /v1/auth/register (integration)', () => {
     });
 
     expect(saved!.onboardingDone).toBe(false);
+  });
+
+  // ── TDD P1-005: user_context seeded atomically with the user ────────────────
+  it('seeds an empty user_context row (context_summary: null, stated_goals: [], session_count: 0)', async () => {
+    await request(app).post('/v1/auth/register').send(VALID_BODY);
+
+    const saved = await db.query.users.findFirst({
+      where:   eq(users.email, TEST_EMAIL),
+      columns: { id: true },
+    });
+
+    const ctx = await db.query.userContext.findFirst({
+      where: eq(userContext.userId, saved!.id),
+    });
+
+    expect(ctx).not.toBeUndefined();
+    expect(ctx!.contextSummary).toBeNull();
+    expect(ctx!.statedGoals).toEqual([]);
+    expect(ctx!.sessionCount).toBe(0);
   });
 });

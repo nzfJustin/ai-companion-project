@@ -3,9 +3,15 @@
  *
  * Unit tests for POST /v1/auth/register.
  * The database is mocked — no running Postgres required.
+ *
+ * Registration now runs inside db.transaction (TDD P1-005): it inserts
+ * the user AND seeds an empty user_context row atomically. The mocked
+ * `tx.insert` dispatches based on which table it's called with.
  */
 
 // ── Mocks (hoisted before imports) ───────────────────────────────────────────
+
+const mockTxInsert = jest.fn();
 
 jest.mock('../../db', () => ({
   db: {
@@ -15,6 +21,9 @@ jest.mock('../../db', () => ({
       },
     },
     insert: jest.fn(),
+    transaction: jest.fn(async (cb: (tx: { insert: typeof mockTxInsert }) => unknown) =>
+      cb({ insert: mockTxInsert }),
+    ),
   },
 }));
 
@@ -31,14 +40,13 @@ jest.mock('bcryptjs', () => ({
 import request from 'supertest';
 import { app } from '../../app';
 import { db }  from '../../db';
+import { users, userContext } from '../../db/schema';
 
 // ── Typed mock handles ────────────────────────────────────────────────────────
 
 const mockFindFirst = db.query.users.findFirst as jest.MockedFunction<
   typeof db.query.users.findFirst
 >;
-
-const mockInsert = db.insert as jest.MockedFunction<typeof db.insert>;
 
 // ── Fixture helpers ───────────────────────────────────────────────────────────
 
@@ -53,13 +61,33 @@ const INSERTED_USER = {
   displayName: 'Alice',
 };
 
+/**
+ * Sets up mockTxInsert to behave like:
+ *   tx.insert(users).values({...}).returning({...})        → [INSERTED_USER]
+ *   tx.insert(userContext).values({ userId })               → resolves
+ *
+ * Returns the `usersValuesFn` and `userContextValuesFn` mocks so individual
+ * tests can assert on what was passed to each.
+ */
 function setupHappyPath() {
-  mockFindFirst.mockResolvedValue(undefined);        // no existing user
-  mockInsert.mockReturnValue({
-    values: jest.fn().mockReturnValue({
-      returning: jest.fn().mockResolvedValue([INSERTED_USER]),
-    }),
-  } as never);
+  mockFindFirst.mockResolvedValue(undefined); // no existing user
+
+  const usersValuesFn = jest.fn().mockReturnValue({
+    returning: jest.fn().mockResolvedValue([INSERTED_USER]),
+  });
+  const userContextValuesFn = jest.fn().mockResolvedValue(undefined);
+
+  mockTxInsert.mockImplementation((table: unknown) => {
+    if (table === users) {
+      return { values: usersValuesFn };
+    }
+    if (table === userContext) {
+      return { values: userContextValuesFn };
+    }
+    throw new Error(`Unexpected table passed to tx.insert: ${String(table)}`);
+  });
+
+  return { usersValuesFn, userContextValuesFn };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -92,7 +120,7 @@ describe('POST /v1/auth/register — success', () => {
   });
 
   it('normalises email to lowercase before DB insert', async () => {
-    setupHappyPath();
+    const { usersValuesFn } = setupHappyPath();
     await request(app)
       .post('/v1/auth/register')
       .send({ ...VALID_BODY, email: 'ALICE@EXAMPLE.COM' });
@@ -102,9 +130,24 @@ describe('POST /v1/auth/register — success', () => {
       expect.objectContaining({ where: expect.anything() }),
     );
     // The values() call should have received the lowercased email
-    const valuesFn = (mockInsert.mock.results[0].value as { values: jest.Mock }).values;
-    expect(valuesFn).toHaveBeenCalledWith(
+    expect(usersValuesFn).toHaveBeenCalledWith(
       expect.objectContaining({ email: 'alice@example.com' }),
+    );
+  });
+
+  it('runs the insert inside db.transaction', async () => {
+    setupHappyPath();
+    await request(app).post('/v1/auth/register').send(VALID_BODY);
+    expect(db.transaction).toHaveBeenCalledTimes(1);
+  });
+
+  // ── TDD P1-005: user_context seeded atomically with the user ────────────────
+  it('seeds an empty user_context row in the same transaction', async () => {
+    const { userContextValuesFn } = setupHappyPath();
+    await request(app).post('/v1/auth/register').send(VALID_BODY);
+
+    expect(userContextValuesFn).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: INSERTED_USER.id }),
     );
   });
 });
@@ -124,10 +167,10 @@ describe('POST /v1/auth/register — duplicate email', () => {
     expect(res.body).toEqual({ error: 'EMAIL_ALREADY_EXISTS' });
   });
 
-  it('does not call db.insert on duplicate', async () => {
+  it('does not start a transaction on duplicate', async () => {
     mockFindFirst.mockResolvedValue({ id: 'existing-id' } as never);
     await request(app).post('/v1/auth/register').send(VALID_BODY);
-    expect(mockInsert).not.toHaveBeenCalled();
+    expect(db.transaction).not.toHaveBeenCalled();
   });
 });
 
@@ -154,7 +197,7 @@ describe('POST /v1/auth/register — validation errors', () => {
   it('does not call the DB on validation failure', async () => {
     await request(app).post('/v1/auth/register').send({});
     expect(mockFindFirst).not.toHaveBeenCalled();
-    expect(mockInsert).not.toHaveBeenCalled();
+    expect(db.transaction).not.toHaveBeenCalled();
   });
 });
 
@@ -169,13 +212,12 @@ describe('POST /v1/auth/register — password hashing', () => {
   });
 
   it('stores the hashed password, not the plaintext', async () => {
-    setupHappyPath();
+    const { usersValuesFn } = setupHappyPath();
     await request(app).post('/v1/auth/register').send(VALID_BODY);
-    const valuesFn = (mockInsert.mock.results[0].value as { values: jest.Mock }).values;
-    expect(valuesFn).toHaveBeenCalledWith(
+    expect(usersValuesFn).toHaveBeenCalledWith(
       expect.objectContaining({ passwordHash: '$2b$12$hashed' }),
     );
-    expect(valuesFn).not.toHaveBeenCalledWith(
+    expect(usersValuesFn).not.toHaveBeenCalledWith(
       expect.objectContaining({ password: VALID_BODY.password }),
     );
   });
