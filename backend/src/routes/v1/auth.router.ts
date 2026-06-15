@@ -15,7 +15,7 @@ import { z }       from 'zod';
 import bcrypt      from 'bcryptjs';
 import { eq, and, isNull } from 'drizzle-orm';
 import { db }      from '../../db';
-import { users, authSessions } from '../../db/schema';
+import { users, authSessions, userContext } from '../../db/schema';
 import { validate }  from '../../middleware/validate';
 import { AppError }  from '../../lib/errors';
 import {
@@ -83,10 +83,20 @@ authRouter.post(
 
       const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
 
-      const [user] = await db
-        .insert(users)
-        .values({ email, passwordHash, displayName: display_name })
-        .returning({ id: users.id, displayName: users.displayName });
+      // Insert the user AND seed an empty user_context row atomically, so
+      // downstream queries (P1-13+) never need to handle a missing
+      // user_context row (TDD P1-005: context_summary: null,
+      // stated_goals: [], session_count: 0 — all schema defaults).
+      const user = await db.transaction(async (tx) => {
+        const [inserted] = await tx
+          .insert(users)
+          .values({ email, passwordHash, displayName: display_name })
+          .returning({ id: users.id, displayName: users.displayName });
+
+        await tx.insert(userContext).values({ userId: inserted.id });
+
+        return inserted;
+      });
 
       return res.status(201).json({
         id:           user.id,
