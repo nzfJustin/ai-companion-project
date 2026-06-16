@@ -14,7 +14,7 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk';
-import type { LLMProvider, CompletionRequest, CompletionResponse, SystemBlock } from './types';
+import type { LLMProvider, CompletionRequest, CompletionResponse } from './types';
 import { LLMRateLimitError, LLMTimeoutError, LLMStreamError } from './errors';
 
 // ─── Defaults ─────────────────────────────────────────────────────────────────

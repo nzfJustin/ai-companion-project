@@ -244,7 +244,7 @@ describe('AnthropicProvider.stream()', () => {
     const client   = makeClient({ stream: jest.fn().mockReturnValue(makeStreamEvents('hi')) });
     const provider = new AnthropicProvider({ client: client as never });
 
-    for await (const _ of provider.stream(BASE_REQ)) { /* consume */ }
+    for await (const _chunk of provider.stream(BASE_REQ)) { /* consume */ }
 
     expect(client.messages.stream).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -340,7 +340,7 @@ describe('AnthropicProvider — system prompt handling', () => {
     const client   = makeClient();
     const provider = new AnthropicProvider({ client: client as never });
 
-    const { system: _, ...reqWithoutSystem } = BASE_REQ;
+    const { system: _system, ...reqWithoutSystem } = BASE_REQ;
     await provider.complete(reqWithoutSystem);
 
     expect(client.messages.create).toHaveBeenCalledWith(

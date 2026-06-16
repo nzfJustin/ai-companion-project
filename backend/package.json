@@ -17,7 +17,7 @@
     "test:unit":        "jest --runInBand --testPathIgnorePatterns='integration'",
     "test:integration": "jest --runInBand --testPathPattern='integration'",
     "test:watch":       "jest --runInBand --watch",
-    "test:coverage":    "jest --runInBand --coverage",
+    "test:coverage":    "jest --runInBand --testPathIgnorePatterns='integration' --coverage",
 
     "lint":             "eslint src --ext .ts",
     "lint:fix":         "eslint src --ext .ts --fix",
@@ -63,6 +63,21 @@
     "testEnvironment": "node",
     "testMatch": ["**/*.test.ts"],
     "moduleFileExtensions": ["ts", "js"],
-    "collectCoverageFrom": ["src/**/*.ts", "!src/**/*.d.ts"]
+    "collectCoverageFrom": [
+      "src/**/*.ts",
+      "!src/**/*.d.ts"
+    ],
+    "collectCoverage": false,
+    "coveragePathIgnorePatterns": [
+      "/node_modules/",
+      "<rootDir>/src/db/schema.ts",
+      "<rootDir>/src/routes/v1/.*\\.router\\.ts$",
+      "<rootDir>/src/routes/health.ts"
+    ],
+    "coverageThreshold": {
+      "global": {
+        "lines": 25
+      }
+    }
   }
 }
