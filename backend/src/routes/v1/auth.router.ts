@@ -6,8 +6,8 @@
  *   POST /v1/auth/login              (P1-05 / TDD P1-002) ✓
  *   POST /v1/auth/refresh            (P1-06 / TDD P1-003) ✓
  *   POST /v1/auth/logout              (P1-07 / TDD P1-003) ✓
- *   POST /v1/auth/memory-pin/set     (P1-09 / TDD P1-004)
- *   POST /v1/auth/memory-pin/verify  (P1-09 / TDD P1-004)
+ *   POST /v1/auth/memory-pin/set     (P1-09 / TDD P1-004) ✓
+ *   POST /v1/auth/memory-pin/verify  (P1-09 / TDD P1-004) ✓
  */
 
 import { Router }  from 'express';
@@ -15,18 +15,23 @@ import { z }       from 'zod';
 import bcrypt      from 'bcryptjs';
 import { eq, and, isNull } from 'drizzle-orm';
 import { db }      from '../../db';
-import { users, authSessions, userContext } from '../../db/schema';
-import { validate }  from '../../middleware/validate';
-import { AppError }  from '../../lib/errors';
+import { users, authSessions, userContext, userMemoryPins } from '../../db/schema';
+import { validate }     from '../../middleware/validate';
+import { authenticate } from '../../middleware/authenticate';
+import { AppError }     from '../../lib/errors';
+import { redis }        from '../../lib/redis';
 import {
   signAccessToken,
   generateRefreshToken,
   generateRawToken,
   hashRefreshToken,
   refreshCookieOptions,
+  signElevatedToken,
   ACCESS_TOKEN_TTL_SEC,
   REFRESH_TOKEN_TTL_MS,
   REFRESH_COOKIE_NAME,
+  ELEVATED_TOKEN_TTL_SEC,
+  ELEVATED_TOKEN_SCOPE,
 } from '../../lib/jwt';
 
 export const authRouter = Router();
@@ -314,3 +319,135 @@ authRouter.post('/logout', async (req, res, next) => {
     return next(err);
   }
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Memory Step-Up PIN  (P1-09 / TDD P1-004)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Memories at level 4-5 require a second factor (a 4-6 digit PIN, separate
+// from the account password). Verifying it issues a short-lived elevated
+// JWT (see lib/jwt.ts signElevatedToken). Both endpoints require a normal
+// authenticated session.
+
+const MAX_PIN_ATTEMPTS    = 3;
+const PIN_FAIL_WINDOW_SEC = 10 * 60; // 10 minutes
+const PIN_LOCK_TTL_SEC    = 15 * 60; // 15 minutes
+
+const pinLockKey = (userId: string) => `pin_lock:${userId}`;
+const pinFailKey = (userId: string) => `pin_fail:${userId}`;
+
+const MemoryPinSchema = z.object({
+  pin: z
+    .string({ required_error: 'pin is required' })
+    .regex(/^\d{4,6}$/, { message: 'pin must be 4-6 digits' }),
+});
+
+type MemoryPinBody = z.infer<typeof MemoryPinSchema>;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /v1/auth/memory-pin/set
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Upserts the user's memory PIN. Setting a new PIN also clears any
+// existing lockout state — a fresh PIN deserves a fresh attempt counter.
+
+authRouter.post(
+  '/memory-pin/set',
+  authenticate,
+  validate(MemoryPinSchema),
+  async (req, res, next) => {
+    const { pin } = req.body as MemoryPinBody;
+    const userId = req.userId!;
+
+    try {
+      const pinHash = await bcrypt.hash(pin, BCRYPT_ROUNDS);
+
+      await db
+        .insert(userMemoryPins)
+        .values({ userId, pinHash })
+        .onConflictDoUpdate({
+          target: userMemoryPins.userId,
+          set:    { pinHash, updatedAt: new Date() },
+        });
+
+      // Clear any prior lockout/attempt state for this user.
+      await redis.del(pinLockKey(userId), pinFailKey(userId));
+
+      return res.status(200).json({ success: true });
+    } catch (err) {
+      return next(err);
+    }
+  },
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /v1/auth/memory-pin/verify
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Flow (TDD P1-004):
+//   1. If pin_lock:{user_id} exists in Redis → 429 PIN_LOCKED.
+//   2. If the user has never set a PIN → 404 PIN_NOT_SET.
+//   3. bcrypt.compare against the stored hash.
+//      - Match: reset the failure counter, issue an elevated JWT.
+//      - No match: increment pin_fail:{user_id} (10-min window). On the
+//        3rd consecutive failure, set pin_lock:{user_id} (15-min TTL) and
+//        return 429 PIN_LOCKED; otherwise 401 INVALID_PIN.
+
+authRouter.post(
+  '/memory-pin/verify',
+  authenticate,
+  validate(MemoryPinSchema),
+  async (req, res, next) => {
+    const { pin } = req.body as MemoryPinBody;
+    const userId = req.userId!;
+
+    try {
+      // ── 1. Lockout check ───────────────────────────────────────────────────
+      const locked = await redis.exists(pinLockKey(userId));
+      if (locked) {
+        return next(new AppError(429, 'PIN_LOCKED'));
+      }
+
+      // ── 2. PIN must have been set ────────────────────────────────────────────
+      const record = await db.query.userMemoryPins.findFirst({
+        where: eq(userMemoryPins.userId, userId),
+      });
+
+      if (!record) {
+        return next(new AppError(404, 'PIN_NOT_SET'));
+      }
+
+      // ── 3. Verify ─────────────────────────────────────────────────────────
+      const match = await bcrypt.compare(pin, record.pinHash);
+
+      if (!match) {
+        const fails = await redis.incr(pinFailKey(userId));
+        if (fails === 1) {
+          await redis.expire(pinFailKey(userId), PIN_FAIL_WINDOW_SEC);
+        }
+
+        if (fails >= MAX_PIN_ATTEMPTS) {
+          await redis.set(pinLockKey(userId), '1', 'EX', PIN_LOCK_TTL_SEC);
+          await redis.del(pinFailKey(userId));
+          return next(new AppError(429, 'PIN_LOCKED'));
+        }
+
+        return next(new AppError(401, 'INVALID_PIN'));
+      }
+
+      // ── 4. Success — reset attempts, issue elevated token ────────────────────
+      await redis.del(pinFailKey(userId));
+
+      const elevatedToken = signElevatedToken(userId);
+
+      return res.status(200).json({
+        elevated_token: elevatedToken,
+        token_type:     'Bearer',
+        expires_in:     ELEVATED_TOKEN_TTL_SEC,
+        scope:          ELEVATED_TOKEN_SCOPE,
+      });
+    } catch (err) {
+      return next(err);
+    }
+  },
+);
