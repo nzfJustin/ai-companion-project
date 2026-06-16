@@ -140,7 +140,7 @@ export class MockLLMProvider implements LLMProvider {
     };
   }
 
-  async *stream(req: CompletionRequest): AsyncIterable<string> {
+  async *stream(req: CompletionRequest): AsyncGenerator<string> {
     this._lastRequest = req;
     this._callCount++;
     this.checkErrors();

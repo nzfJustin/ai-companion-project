@@ -82,7 +82,7 @@ export class AnthropicProvider implements LLMProvider {
 
   // ─── stream ─────────────────────────────────────────────────────────────────
 
-  async *stream(req: CompletionRequest): AsyncIterable<string> {
+  async *stream(req: CompletionRequest): AsyncGenerator<string> {
     let streamIterable: AsyncIterable<Anthropic.RawMessageStreamEvent>;
 
     try {

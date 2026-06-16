@@ -35,9 +35,7 @@ function makeAnthropicMessage(overrides: Partial<Anthropic.Message> = {}): Anthr
     usage: {
       input_tokens:  50,
       output_tokens: 10,
-      cache_creation_input_tokens: 0,
-      cache_read_input_tokens:     0,
-    },
+    } as unknown as Anthropic.Usage,
     ...overrides,
   };
 }
@@ -53,8 +51,7 @@ async function* makeStreamEvents(
       content: [],
       usage: {
         input_tokens: 40, output_tokens: 0,
-        cache_creation_input_tokens: 0, cache_read_input_tokens: 5,
-      },
+      } as unknown as Anthropic.Usage,
     },
   };
   yield { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } };
@@ -135,9 +132,8 @@ describe('AnthropicProvider.complete()', () => {
       usage: {
         input_tokens:  80,
         output_tokens: 15,
-        cache_creation_input_tokens: 0,
-        cache_read_input_tokens:     25,
-      },
+        cache_read_input_tokens: 25,
+      } as unknown as Anthropic.Usage,
     });
     const client   = makeClient({ create: jest.fn().mockResolvedValue(apiMessage) });
     const provider = new AnthropicProvider({ client: client as never });
@@ -172,9 +168,8 @@ describe('AnthropicProvider.complete()', () => {
       usage: {
         input_tokens:  50,
         output_tokens: 10,
-        cache_creation_input_tokens: 0,
-        cache_read_input_tokens:     undefined as unknown as number,
-      },
+        cache_read_input_tokens: undefined,
+      } as unknown as Anthropic.Usage,
     });
     const client   = makeClient({ create: jest.fn().mockResolvedValue(apiMessage) });
     const provider = new AnthropicProvider({ client: client as never });
@@ -263,7 +258,7 @@ describe('AnthropicProvider.stream()', () => {
 
   it('yields only text_delta events (skips other event types)', async () => {
     async function* mixedEvents(): AsyncIterable<Anthropic.RawMessageStreamEvent> {
-      yield { type: 'message_start', message: { id: 'x', type: 'message', role: 'assistant', model: 'x', stop_reason: null, stop_sequence: null, content: [], usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } } };
+      yield { type: 'message_start', message: { id: 'x', type: 'message', role: 'assistant', model: 'x', stop_reason: null, stop_sequence: null, content: [], usage: { input_tokens: 0, output_tokens: 0 } as unknown as Anthropic.Usage } };
       yield { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'chunk1' } };
       yield { type: 'content_block_stop', index: 0 };
       yield { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'chunk2' } };

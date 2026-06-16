@@ -98,5 +98,5 @@ export interface LLMProvider {
    * @throws {LLMTimeoutError}    Network / read timeout
    * @throws {LLMStreamError}     Mid-stream error
    */
-  stream(req: CompletionRequest): AsyncIterable<string>;
+  stream(req: CompletionRequest): AsyncGenerator<string>;
 }
