@@ -71,7 +71,7 @@ export class AnthropicProvider implements LLMProvider {
         usage: {
           input_tokens:  message.usage.input_tokens,
           output_tokens: message.usage.output_tokens,
-          cached_tokens: message.usage.cache_read_input_tokens ?? 0,
+          cached_tokens: (message.usage as unknown as Record<string, number>)['cache_read_input_tokens'] ?? 0,
         },
         stop_reason: message.stop_reason ?? undefined,
       };
