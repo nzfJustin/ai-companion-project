@@ -63,6 +63,21 @@
     "testEnvironment": "node",
     "testMatch": ["**/*.test.ts"],
     "moduleFileExtensions": ["ts", "js"],
-    "collectCoverageFrom": ["src/**/*.ts", "!src/**/*.d.ts"]
+    "collectCoverageFrom": [
+      "src/**/*.ts",
+      "!src/**/*.d.ts"
+    ],
+    "collectCoverage": false,
+    "coveragePathIgnorePatterns": [
+      "/node_modules/",
+      "<rootDir>/src/db/schema.ts",
+      "<rootDir>/src/routes/v1/.*\\.router\\.ts$",
+      "<rootDir>/src/routes/health.ts"
+    ],
+    "coverageThreshold": {
+      "global": {
+        "lines": 70
+      }
+    }
   }
 }
