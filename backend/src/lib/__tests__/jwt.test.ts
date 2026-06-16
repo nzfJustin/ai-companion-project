@@ -11,7 +11,12 @@ import {
   signAccessToken,
   verifyAccessToken,
   generateRefreshToken,
+  signElevatedToken,
+  verifyElevatedToken,
   ACCESS_TOKEN_TTL_SEC,
+  ELEVATED_TOKEN_TTL_SEC,
+  ELEVATED_TOKEN_SCOPE,
+  ELEVATED_ACCESS_LEVEL,
 } from '../jwt';
 
 // ─── Setup: generate a fresh RSA-2048 key pair ────────────────────────────────
@@ -145,5 +150,96 @@ describe('generateRefreshToken', () => {
     const b = generateRefreshToken();
     expect(a.token).not.toBe(b.token);
     expect(a.family).not.toBe(b.family);
+  });
+});
+
+// ── signElevatedToken ─────────────────────────────────────────────────────────
+
+describe('signElevatedToken', () => {
+  it('returns a valid three-part JWT', () => {
+    const token = signElevatedToken(USER_ID);
+    expect(token.split('.')).toHaveLength(3);
+  });
+
+  it('uses RS256', () => {
+    const token = signElevatedToken(USER_ID);
+    const header = JSON.parse(Buffer.from(token.split('.')[0], 'base64').toString('utf8'));
+    expect(header.alg).toBe('RS256');
+  });
+
+  it('sets sub, access_level, and scope claims', () => {
+    const token = signElevatedToken(USER_ID);
+    const decoded = jwt.decode(token) as Record<string, unknown>;
+    expect(decoded.sub).toBe(USER_ID);
+    expect(decoded.access_level).toBe(ELEVATED_ACCESS_LEVEL);
+    expect(decoded.scope).toBe(ELEVATED_TOKEN_SCOPE);
+  });
+
+  it(`expires in ${ELEVATED_TOKEN_TTL_SEC} seconds (10 minutes)`, () => {
+    const token = signElevatedToken(USER_ID);
+    const decoded = jwt.decode(token) as Record<string, number>;
+    expect(decoded.exp - decoded.iat).toBe(ELEVATED_TOKEN_TTL_SEC);
+    expect(ELEVATED_TOKEN_TTL_SEC).toBe(600);
+  });
+});
+
+// ── verifyElevatedToken ────────────────────────────────────────────────────────
+
+describe('verifyElevatedToken', () => {
+  it('round-trips: verify(sign(userId)).sub === userId', () => {
+    const token   = signElevatedToken(USER_ID);
+    const payload = verifyElevatedToken(token);
+    expect(payload.sub).toBe(USER_ID);
+    expect(payload.access_level).toBe(ELEVATED_ACCESS_LEVEL);
+    expect(payload.scope).toBe(ELEVATED_TOKEN_SCOPE);
+  });
+
+  it('rejects a standard access token (TDD P1-004: different scope claim)', () => {
+    // A normal access token is signed with the SAME key, so its signature
+    // is valid — but it lacks `scope`/`access_level`, so it must still be
+    // rejected as an elevated token.
+    const standardToken = signAccessToken(USER_ID);
+    expect(() => verifyElevatedToken(standardToken)).toThrow(jwt.JsonWebTokenError);
+  });
+
+  it('throws on an expired elevated token', () => {
+    const expired = jwt.sign(
+      { sub: USER_ID, access_level: ELEVATED_ACCESS_LEVEL, scope: ELEVATED_TOKEN_SCOPE },
+      process.env.JWT_PRIVATE_KEY!,
+      { algorithm: 'RS256', expiresIn: -1 },
+    );
+    expect(() => verifyElevatedToken(expired)).toThrow(jwt.TokenExpiredError);
+  });
+
+  it('rejects a token with the wrong scope value', () => {
+    const wrongScope = jwt.sign(
+      { sub: USER_ID, access_level: ELEVATED_ACCESS_LEVEL, scope: 'something_else' },
+      process.env.JWT_PRIVATE_KEY!,
+      { algorithm: 'RS256', expiresIn: ELEVATED_TOKEN_TTL_SEC },
+    );
+    expect(() => verifyElevatedToken(wrongScope)).toThrow(jwt.JsonWebTokenError);
+  });
+
+  it('rejects a token with the wrong access_level', () => {
+    const wrongLevel = jwt.sign(
+      { sub: USER_ID, access_level: 1, scope: ELEVATED_TOKEN_SCOPE },
+      process.env.JWT_PRIVATE_KEY!,
+      { algorithm: 'RS256', expiresIn: ELEVATED_TOKEN_TTL_SEC },
+    );
+    expect(() => verifyElevatedToken(wrongLevel)).toThrow(jwt.JsonWebTokenError);
+  });
+
+  it('rejects a token signed with a different key', () => {
+    const { privateKey: otherKey } = generateKeyPairSync('rsa', {
+      modulusLength: 2048,
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+      publicKeyEncoding:  { type: 'spki',  format: 'pem' },
+    });
+    const forged = jwt.sign(
+      { sub: USER_ID, access_level: ELEVATED_ACCESS_LEVEL, scope: ELEVATED_TOKEN_SCOPE },
+      otherKey,
+      { algorithm: 'RS256', expiresIn: ELEVATED_TOKEN_TTL_SEC },
+    );
+    expect(() => verifyElevatedToken(forged)).toThrow();
   });
 });
