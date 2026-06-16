@@ -144,3 +144,76 @@ export function generateRefreshToken(): { token: string; family: string } {
 export function hashRefreshToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
+
+// ─── Elevated (memory step-up) token operations ──────────────────────────────
+//
+// TDD P1-004: Memories at level 4-5 require a second factor (the user's
+// memory PIN). On success, POST /v1/auth/memory-pin/verify issues a
+// short-lived "elevated" JWT carrying { access_level: 5, scope:
+// "memory_elevated" }. It's signed with the SAME RS256 key pair as
+// standard access tokens, but verifyElevatedToken() additionally checks
+// the scope/access_level claims — so a normal access token (which lacks
+// them) is rejected even though its signature is valid.
+
+/** Elevated token lifetime in seconds. */
+export const ELEVATED_TOKEN_TTL_SEC = 10 * 60; // 10 minutes
+
+/** Required `scope` claim on an elevated token. */
+export const ELEVATED_TOKEN_SCOPE = 'memory_elevated' as const;
+
+/** Required `access_level` claim on an elevated token. */
+export const ELEVATED_ACCESS_LEVEL = 5 as const;
+
+export interface ElevatedTokenPayload {
+  /** Subject — the user's UUID */
+  sub: string;
+  access_level: number;
+  scope: string;
+  iat: number;
+  exp: number;
+}
+
+/**
+ * Signs a short-lived elevated JWT for memory step-up access.
+ */
+export function signElevatedToken(userId: string): string {
+  return jwt.sign(
+    {
+      sub:          userId,
+      access_level: ELEVATED_ACCESS_LEVEL,
+      scope:        ELEVATED_TOKEN_SCOPE,
+    },
+    getJwtPrivateKey(),
+    {
+      algorithm: 'RS256',
+      expiresIn: ELEVATED_TOKEN_TTL_SEC,
+    },
+  );
+}
+
+/**
+ * Verifies an elevated JWT.
+ *
+ * Beyond signature/expiry (handled by jwt.verify), this also enforces the
+ * `scope` and `access_level` claims — a syntactically valid standard
+ * access token (signed with the same key, but lacking these claims) is
+ * rejected as a JsonWebTokenError.
+ *
+ * @throws {jwt.JsonWebTokenError}  Invalid signature, or missing/wrong
+ *                                  scope/access_level claims
+ * @throws {jwt.TokenExpiredError}  Token has expired
+ */
+export function verifyElevatedToken(token: string): ElevatedTokenPayload {
+  const payload = jwt.verify(token, getJwtPublicKey(), {
+    algorithms: ['RS256'],
+  }) as jwt.JwtPayload;
+
+  if (
+    payload.scope !== ELEVATED_TOKEN_SCOPE ||
+    payload.access_level !== ELEVATED_ACCESS_LEVEL
+  ) {
+    throw new jwt.JsonWebTokenError('Token is not a valid memory-elevated token');
+  }
+
+  return payload as unknown as ElevatedTokenPayload;
+}
