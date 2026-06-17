@@ -1,0 +1,17 @@
+node_modules
+dist
+dist-ssr
+*.local
+
+.env.local
+.env.*.local
+
+*.log
+npm-debug.log*
+
+.DS_Store
+coverage
+
+*.tsbuildinfo
+*.d.ts
+vite.config.js
