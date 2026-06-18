@@ -12,10 +12,12 @@
 
 import { createBrowserRouter, Navigate } from 'react-router-dom';
 import { PlaceholderScreen } from './screens/PlaceholderScreen';
+import { LoginScreen } from './screens/LoginScreen';
+import { RegisterScreen } from './screens/RegisterScreen';
 
 export const router = createBrowserRouter([
-  { path: '/login',                element: <PlaceholderScreen name="/login" /> },
-  { path: '/register',             element: <PlaceholderScreen name="/register" /> },
+  { path: '/login',                element: <LoginScreen /> },
+  { path: '/register',             element: <RegisterScreen /> },
   { path: '/onboarding',           element: <PlaceholderScreen name="/onboarding" /> },
   { path: '/chat',                 element: <PlaceholderScreen name="/chat" /> },
   { path: '/chat/:conversationId', element: <PlaceholderScreen name="/chat/:conversationId" /> },
