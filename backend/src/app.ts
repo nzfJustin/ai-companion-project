@@ -19,7 +19,33 @@ export const app = express();
 
 // ── Security middleware ────────────────────────────────────────────────────────
 app.use(helmet());
-app.use(cors());
+
+/**
+ * CORS_ORIGIN must be an explicit origin (not "*") because every frontend
+ * request is sent with credentials: 'include' (it needs the httpOnly
+ * refresh_token cookie). Browsers reject Access-Control-Allow-Origin: "*"
+ * combined with credentialed requests, so the default `cors()` config
+ * — which uses the wildcard — silently blocks every request from the
+ * frontend before it reaches any route handler.
+ *
+ * Set CORS_ORIGIN in .env to your frontend's dev/staging/prod URL, e.g.
+ * CORS_ORIGIN=http://localhost:5173
+ */
+const corsOrigin = process.env.CORS_ORIGIN;
+if (!corsOrigin) {
+  // eslint-disable-next-line no-console
+  console.warn(
+    'CORS_ORIGIN is not set — falling back to http://localhost:5173. ' +
+    'Set CORS_ORIGIN in .env for staging/production.',
+  );
+}
+
+app.use(
+  cors({
+    origin: corsOrigin ?? 'http://localhost:5173',
+    credentials: true,
+  }),
+);
 
 // ── Body + cookie parsing ─────────────────────────────────────────────────────
 app.use(express.json({ limit: '256kb' }));
