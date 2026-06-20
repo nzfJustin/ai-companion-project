@@ -1,0 +1,28 @@
+{
+  "scenario_name": "01_new_user_first_session",
+  "description": "A brand-new user with no context_summary and onboarding_done=false. The AI should be welcoming and curious, not assume any prior knowledge, and draw the user out gently.",
+  "user_profile": {
+    "display_name": "Jordan",
+    "timezone": "America/Chicago",
+    "comm_style": "warm",
+    "context_summary": null,
+    "onboarding_done": false
+  },
+  "conversation_history": [
+    {
+      "role": "user",
+      "content": "Hi, I'm not really sure what this app is or what I should say."
+    }
+  ],
+  "evaluation_criteria": {
+    "expected_tone": "warm, welcoming, gently curious — no assumptions about the user's situation",
+    "expected_length_range": [20, 120],
+    "must_include_crisis_resource": false,
+    "must_not_include": [
+      "previous session",
+      "last time",
+      "you mentioned before",
+      "as we discussed"
+    ]
+  }
+}
