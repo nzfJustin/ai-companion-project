@@ -33,7 +33,7 @@ const ONBOARDING_REQ: OrchestrationRequest = {
   userProfile: { ...BASE_PROFILE, onboardingDone: false },
 };
 
-const EXTRACTION_REQ: OrchestrationRequest = {
+const _EXTRACTION_REQ: OrchestrationRequest = {
   mode:        'extraction',
   messages:    [{ role: 'user', content: 'I had a stressful day.' }],
   userProfile: BASE_PROFILE,
@@ -339,6 +339,7 @@ describe('AIOrchestrationService.stream()', () => {
     const provider: import('../llm/types').LLMProvider = {
       complete: jest.fn(),
       stream:   jest.fn().mockImplementation(async function *() {
+        yield ''; // satisfy require-yield; throw before consumer sees it
         throw new LLMRateLimitError();
       }),
     };
@@ -356,6 +357,7 @@ describe('AIOrchestrationService.stream()', () => {
     const provider: import('../llm/types').LLMProvider = {
       complete: jest.fn(),
       stream:   jest.fn().mockImplementation(async function *() {
+        yield ''; // satisfy require-yield; throw before consumer sees it
         throw new LLMTimeoutError();
       }),
     };
