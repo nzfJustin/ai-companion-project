@@ -5,7 +5,9 @@
  * all fetch/error-handling/retry logic centralized in src/api/client.ts.
  */
 
-import { apiFetch } from './client';
+import { apiFetch, ApiError } from './client';
+import { API_BASE_URL } from './config';
+import { setAccessTokenDirect } from '../store/authStore';
 
 // ─── Register ─────────────────────────────────────────────────────────────────
 
@@ -61,4 +63,43 @@ export interface MeResponse {
 
 export function getMe(): Promise<MeResponse> {
   return apiFetch<MeResponse>('/v1/users/me', { method: 'GET' });
+}
+
+// ─── Session refresh (used by ProtectedRoute) ─────────────────────────────────
+
+/**
+ * Calls POST /v1/auth/refresh directly — not through apiFetch — so there
+ * is no risk of infinite recursion (apiFetch itself calls this path when
+ * handling a 401). On success, writes the new access token to the Zustand
+ * store so every subsequent apiFetch call picks it up automatically.
+ *
+ * @throws {ApiError} when the refresh token is missing/expired/revoked
+ */
+export async function refreshSession(): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/v1/auth/refresh`, {
+    method: 'POST',
+    credentials: 'include', // sends the httpOnly refresh_token cookie
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}) as { error?: string });
+    throw new ApiError(res.status, body.error ?? 'REFRESH_FAILED');
+  }
+
+  const data = (await res.json()) as { access_token: string };
+  setAccessTokenDirect(data.access_token);
+}
+
+// ─── Logout ───────────────────────────────────────────────────────────────────
+
+/**
+ * Revokes the current session on the server. The caller is responsible
+ * for clearing client-side auth state (useAuthStore.clear()) and
+ * redirecting to /login — this function only makes the API call.
+ *
+ * Errors are intentionally swallowed by the caller in AppShell because
+ * we must clear the client session regardless of server-side success.
+ */
+export function logout(): Promise<void> {
+  return apiFetch('/v1/auth/logout', { method: 'POST' });
 }
