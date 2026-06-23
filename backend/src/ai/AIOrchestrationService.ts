@@ -314,13 +314,11 @@ export class AIOrchestrationService {
       onboarding_done: req.userProfile.onboardingDone,
     };
 
-    // For forced onboarding mode, override the flag so selectPrompt always
-    // picks ONBOARDING_PROMPT regardless of the stored value.
-    if (req.mode === 'onboarding') {
-      ctx.onboarding_done = false;
-    }
-
-    const prompt = selectPrompt(ctx);
+    // selectPrompt() handles all mode routing:
+    //   'extraction' → ONBOARDING_EXTRACTION_PROMPT (static, ignores ctx)
+    //   'onboarding' → ONBOARDING_PROMPT (always, ignores onboarding_done flag)
+    //   'chat'       → CHAT_PROMPT or ONBOARDING_PROMPT based on ctx.onboarding_done
+    const prompt = selectPrompt(ctx, req.mode);
     const system = prompt.system(ctx);
 
     return { prompt, system };

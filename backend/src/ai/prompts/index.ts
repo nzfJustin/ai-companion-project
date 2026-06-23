@@ -240,9 +240,69 @@ export const ONBOARDING_PROMPT: VersionedPrompt = {
 // ─── Prompt selector ──────────────────────────────────────────────────────────
 
 /**
- * Returns the appropriate versioned prompt for the given context.
+ * Returns the appropriate versioned prompt for the given context and call mode.
  * AIOrchestrationService calls this to pick the prompt before each call.
+ *
+ * @param ctx  User context — used for chat/onboarding mode selection
+ * @param mode Optional override:
+ *   'extraction' — always returns ONBOARDING_EXTRACTION_PROMPT (static)
+ *   'onboarding' — always returns ONBOARDING_PROMPT (ignores onboarding_done flag)
+ *   'chat'       — default; returns CHAT_PROMPT or ONBOARDING_PROMPT based on ctx
  */
-export function selectPrompt(ctx: PromptContext): VersionedPrompt {
+export function selectPrompt(
+  ctx:  PromptContext,
+  mode: 'chat' | 'extraction' | 'onboarding' = 'chat',
+): VersionedPrompt {
+  if (mode === 'extraction') return ONBOARDING_EXTRACTION_PROMPT;
+  if (mode === 'onboarding') return ONBOARDING_PROMPT;
   return ctx.onboarding_done ? CHAT_PROMPT : ONBOARDING_PROMPT;
 }
+
+// ─── Onboarding extraction prompt ────────────────────────────────────────────
+// Used by OnboardingService after the first conversation closes. Instructs
+// the LLM to return structured JSON for profile seeding. The system function
+// ignores ctx because this prompt is fully static — context comes from the
+// conversation messages themselves.
+
+const ONBOARDING_EXTRACTION_SYSTEM = `\
+You are analyzing an onboarding conversation between a new user and an AI companion.
+
+Extract a structured user profile from this conversation. Return ONLY valid JSON with \
+no other text, code fences, or explanation outside the JSON object.
+
+Required JSON structure:
+{
+  "title": "Short title for this memory (under 80 chars)",
+  "summary": "2-3 sentence summary of what was discussed",
+  "key_events": ["notable thing mentioned", "another notable thing"],
+  "dominant_emotion": "the primary emotion the user expressed (single lowercase word)",
+  "emotion_scores": {
+    "joy":       0.0-1.0,
+    "sadness":   0.0-1.0,
+    "anxiety":   0.0-1.0,
+    "anger":     0.0-1.0,
+    "calm":      0.0-1.0,
+    "excitement": 0.0-1.0
+  },
+  "memory_level": 2,
+  "inferred_comm_style": "warm" | "direct" | "reflective",
+  "stated_goals": ["what the user wants from this companion"],
+  "initial_context": "2-3 sentences summarizing who this user is and what brought them here"
+}
+
+Guidelines:
+- inferred_comm_style: warm = emotionally expressive, direct = concise/practical, reflective = introspective
+- stated_goals: max 5 items, each under 150 characters
+- initial_context: written from the AI's perspective for use in future sessions
+- If the conversation is too short to infer a field, use these defaults:
+  - inferred_comm_style: "warm"
+  - stated_goals: []
+  - initial_context: "User is new and has not yet shared much about themselves."
+  - dominant_emotion: "calm"
+  - All emotion_scores: 0.5 for calm, 0.2 for others\
+`;
+
+export const ONBOARDING_EXTRACTION_PROMPT: VersionedPrompt = {
+  version: 'onboarding_extraction_v1.0.0',
+  system:  (_ctx: PromptContext) => ONBOARDING_EXTRACTION_SYSTEM,
+};
