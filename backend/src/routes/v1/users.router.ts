@@ -13,11 +13,16 @@ import { z }      from 'zod';
 import { eq }     from 'drizzle-orm';
 import { db }     from '../../db';
 import { users, commStyleEnum } from '../../db/schema';
-import { authenticate } from '../../middleware/authenticate';
-import { validate }     from '../../middleware/validate';
-import { AppError }     from '../../lib/errors';
+import { authenticate }  from '../../middleware/authenticate';
+import { globalRateLimit } from '../../middleware/rateLimit';
+import { validate }      from '../../middleware/validate';
+import { AppError }      from '../../lib/errors';
 
 export const usersRouter = Router();
+
+// All /v1/users routes require authentication and are globally rate-limited.
+usersRouter.use(authenticate);
+usersRouter.use(globalRateLimit);
 
 // ─── Shared column selections ─────────────────────────────────────────────────
 
@@ -78,7 +83,7 @@ function toMeResponse(user: MeRow) {
 // GET /v1/users/me
 // ─────────────────────────────────────────────────────────────────────────────
 
-usersRouter.get('/me', authenticate, async (req, res, next) => {
+usersRouter.get('/me', async (req, res, next) => {
   try {
     const user = await db.query.users.findFirst({
       where:   eq(users.id, req.userId!),
@@ -127,7 +132,6 @@ const VALID_COMM_STYLES = commStyleEnum.enumValues; // ['warm', 'direct', 'refle
 
 usersRouter.patch(
   '/me',
-  authenticate,
   validate(PatchMeSchema),
   async (req, res, next) => {
     const body = req.body as PatchMeBody;
