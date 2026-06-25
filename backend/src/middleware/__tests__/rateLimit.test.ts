@@ -200,7 +200,6 @@ describe('createRateLimit — Redis eval arguments', () => {
     mockEval.mockResolvedValue([1, 0]);
 
     const limiter = createRateLimit({ windowMs: 30_000, max: 10 });
-    const before = Date.now();
     await runMiddleware(limiter, makeReq('user-1'));
 
     const nowArg         = parseInt(mockEval.mock.calls[0][3], 10); // ARGV[1]
