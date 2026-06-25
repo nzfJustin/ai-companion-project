@@ -10,10 +10,11 @@ import express           from 'express';
 import helmet            from 'helmet';
 import cors              from 'cors';
 import cookieParser      from 'cookie-parser';
-import { healthRouter }  from './routes/health';
-import { authRouter }    from './routes/v1/auth.router';
-import { usersRouter }   from './routes/v1/users.router';
-import { errorHandler }  from './middleware/errorHandler';
+import { healthRouter }        from './routes/health';
+import { authRouter }          from './routes/v1/auth.router';
+import { usersRouter }         from './routes/v1/users.router';
+import { conversationsRouter } from './routes/v1/conversations.router';
+import { errorHandler }        from './middleware/errorHandler';
 
 export const app = express();
 
@@ -52,9 +53,10 @@ app.use(express.json({ limit: '256kb' }));
 app.use(cookieParser());
 
 // ── Routes ────────────────────────────────────────────────────────────────────
-app.use('/health',   healthRouter);
-app.use('/v1/auth',  authRouter);
-app.use('/v1/users', usersRouter);
+app.use('/health',          healthRouter);
+app.use('/v1/auth',         authRouter);
+app.use('/v1/users',        usersRouter);
+app.use('/v1/conversations', conversationsRouter);
 
 // Upcoming routes (uncommented as each task lands):
 // app.use('/v1/conversations', conversationsRouter);
