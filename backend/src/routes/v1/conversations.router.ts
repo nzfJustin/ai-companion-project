@@ -25,12 +25,20 @@ import { z }         from 'zod';
 import { eq, desc } from 'drizzle-orm';
 import { db }        from '../../db';
 import { conversations, messages } from '../../db/schema';
-import { authenticate } from '../../middleware/authenticate';
-import { validate }     from '../../middleware/validate';
-import { AppError }     from '../../lib/errors';
+import { authenticate }  from '../../middleware/authenticate';
+import { globalRateLimit } from '../../middleware/rateLimit'; // aiRateLimit added in P1-18
+import { validate }      from '../../middleware/validate';
+import { AppError }      from '../../lib/errors';
 import { EncryptionService } from '../../services/EncryptionService';
 
 export const conversationsRouter = Router();
+
+// ─── Router-level middleware ───────────────────────────────────────────────────
+// All routes in this router require authentication and are subject to the
+// global rate limit (60 req/min).  The messages endpoint (P1-18) will add
+// aiRateLimit (20 req/min) on top of this.
+conversationsRouter.use(authenticate);
+conversationsRouter.use(globalRateLimit);
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -42,7 +50,7 @@ const RECENT_MSGS_LIMIT  = 20;
 // POST /v1/conversations
 // ─────────────────────────────────────────────────────────────────────────────
 
-conversationsRouter.post('/', authenticate, async (req, res, next) => {
+conversationsRouter.post('/', async (req, res, next) => {
   try {
     const [conv] = await db
       .insert(conversations)
@@ -67,7 +75,7 @@ conversationsRouter.post('/', authenticate, async (req, res, next) => {
 // GET /v1/conversations
 // ─────────────────────────────────────────────────────────────────────────────
 
-conversationsRouter.get('/', authenticate, async (req, res, next) => {
+conversationsRouter.get('/', async (req, res, next) => {
   const page = Math.max(
     1,
     parseInt(String(req.query.page ?? '1'), 10) || 1,
@@ -121,7 +129,6 @@ const PatchConversationSchema = z.object({
 
 conversationsRouter.patch(
   '/:id',
-  authenticate,
   validate(PatchConversationSchema),
   async (req, res, next) => {
     const { id } = req.params;
@@ -179,7 +186,7 @@ conversationsRouter.patch(
 // Returns 404 (not 403) when the conversation belongs to another user, to
 // avoid leaking the existence of other users' conversations.
 
-conversationsRouter.get('/:id', authenticate, async (req, res, next) => {
+conversationsRouter.get('/:id', async (req, res, next) => {
   const { id } = req.params;
 
   try {
@@ -199,8 +206,8 @@ conversationsRouter.get('/:id', authenticate, async (req, res, next) => {
       limit:   RECENT_MSGS_LIMIT,
     });
 
-    // Lazily construct EncryptionService so GET/:id works even when no
-    // messages exist (avoids throwing if APP_SECRET is absent in test envs).
+    // Lazily construct EncryptionService so GET/:id works even when there are
+    // no messages (avoids throwing if APP_SECRET is absent in test envs).
     let enc: EncryptionService | null = null;
     const decryptedMessages = rawMessages.reverse().map((m) => {
       if (!enc) enc = new EncryptionService(req.userId!);
@@ -225,3 +232,14 @@ conversationsRouter.get('/:id', authenticate, async (req, res, next) => {
     return next(err);
   }
 });
+
+// ─── POST /v1/conversations/:id/messages ──────────────────────────────────────
+// Implemented in P1-18. Will apply aiRateLimit in addition to globalRateLimit:
+//
+//   conversationsRouter.post(
+//     "/:id/messages",
+//     aiRateLimit,      ← 20 req/min (AI cost guard)
+//     validate(MessageSchema),
+//     messagesHandler,
+//   );
+
