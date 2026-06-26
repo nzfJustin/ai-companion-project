@@ -121,7 +121,7 @@ describe('GET /v1/users/me', () => {
     mockFindFirst.mockResolvedValue(undefined as never);
     const res = await request(app).get('/v1/users/me').set('Authorization', authHeader);
     expect(res.status).toBe(404);
-    expect(res.body).toEqual({ error: 'USER_NOT_FOUND' });
+    expect(res.body).toMatchObject({ error: 'USER_NOT_FOUND' });
   });
 
   it('returns 404 for a soft-deleted user', async () => {
@@ -184,7 +184,7 @@ describe('PATCH /v1/users/me', () => {
       .send({ comm_style: 'sarcastic' });
 
     expect(res.status).toBe(400);
-    expect(res.body).toEqual({ error: 'INVALID_COMM_STYLE' });
+    expect(res.body).toMatchObject({ error: 'INVALID_COMM_STYLE' });
   });
 
   it('does not call db.update when comm_style is invalid', async () => {

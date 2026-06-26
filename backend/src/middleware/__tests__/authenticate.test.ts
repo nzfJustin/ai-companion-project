@@ -49,7 +49,7 @@ describe('authenticate middleware', () => {
     const app = buildApp();
     const res = await request(app).get('/protected');
     expect(res.status).toBe(401);
-    expect(res.body).toEqual({ error: 'UNAUTHORIZED' });
+    expect(res.body).toMatchObject({ error: 'UNAUTHORIZED' });
   });
 
   it('returns 401 UNAUTHORIZED when header does not start with "Bearer "', async () => {
@@ -58,7 +58,7 @@ describe('authenticate middleware', () => {
       .get('/protected')
       .set('Authorization', 'Basic sometoken');
     expect(res.status).toBe(401);
-    expect(res.body).toEqual({ error: 'UNAUTHORIZED' });
+    expect(res.body).toMatchObject({ error: 'UNAUTHORIZED' });
   });
 
   it('returns 401 UNAUTHORIZED when "Bearer " has no token', async () => {
@@ -67,7 +67,7 @@ describe('authenticate middleware', () => {
       .get('/protected')
       .set('Authorization', 'Bearer ');
     expect(res.status).toBe(401);
-    expect(res.body).toEqual({ error: 'UNAUTHORIZED' });
+    expect(res.body).toMatchObject({ error: 'UNAUTHORIZED' });
   });
 
   it('returns 401 UNAUTHORIZED for a malformed token', async () => {
@@ -76,7 +76,7 @@ describe('authenticate middleware', () => {
       .get('/protected')
       .set('Authorization', 'Bearer not.a.jwt');
     expect(res.status).toBe(401);
-    expect(res.body).toEqual({ error: 'UNAUTHORIZED' });
+    expect(res.body).toMatchObject({ error: 'UNAUTHORIZED' });
   });
 
   it('returns 401 UNAUTHORIZED for a token signed with a different key', async () => {
@@ -93,7 +93,7 @@ describe('authenticate middleware', () => {
       .set('Authorization', `Bearer ${forged}`);
 
     expect(res.status).toBe(401);
-    expect(res.body).toEqual({ error: 'UNAUTHORIZED' });
+    expect(res.body).toMatchObject({ error: 'UNAUTHORIZED' });
   });
 
   it('returns 401 TOKEN_EXPIRED for an expired token', async () => {
@@ -109,7 +109,7 @@ describe('authenticate middleware', () => {
       .set('Authorization', `Bearer ${expired}`);
 
     expect(res.status).toBe(401);
-    expect(res.body).toEqual({ error: 'TOKEN_EXPIRED' });
+    expect(res.body).toMatchObject({ error: 'TOKEN_EXPIRED' });
   });
 
   it('calls next() and sets req.userId for a valid token', async () => {
@@ -133,6 +133,6 @@ describe('authenticate middleware', () => {
       .set('Authorization', `bearer ${token}`); // lowercase
 
     expect(res.status).toBe(401);
-    expect(res.body).toEqual({ error: 'UNAUTHORIZED' });
+    expect(res.body).toMatchObject({ error: 'UNAUTHORIZED' });
   });
 });

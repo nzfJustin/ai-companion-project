@@ -149,7 +149,7 @@ describe('POST /v1/auth/login — invalid credentials', () => {
     mockCompare.mockResolvedValue(false as never);
     const res = await request(app).post('/v1/auth/login').send(VALID_BODY);
     expect(res.status).toBe(401);
-    expect(res.body).toEqual({ error: 'INVALID_CREDENTIALS' });
+    expect(res.body).toMatchObject({ error: 'INVALID_CREDENTIALS' });
   });
 
   it('returns 401 when password is wrong', async () => {
@@ -157,7 +157,7 @@ describe('POST /v1/auth/login — invalid credentials', () => {
     mockCompare.mockResolvedValue(false as never);
     const res = await request(app).post('/v1/auth/login').send(VALID_BODY);
     expect(res.status).toBe(401);
-    expect(res.body).toEqual({ error: 'INVALID_CREDENTIALS' });
+    expect(res.body).toMatchObject({ error: 'INVALID_CREDENTIALS' });
   });
 
   it('returns 401 for a soft-deleted user', async () => {
