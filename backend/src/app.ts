@@ -14,9 +14,13 @@ import { healthRouter }        from './routes/health';
 import { authRouter }          from './routes/v1/auth.router';
 import { usersRouter }         from './routes/v1/users.router';
 import { conversationsRouter } from './routes/v1/conversations.router';
+import { requestLogger }       from './middleware/requestLogger';
 import { errorHandler }        from './middleware/errorHandler';
 
 export const app = express();
+
+// ── Observability — mount FIRST so every request gets a request_id ───────────
+app.use(requestLogger);
 
 // ── Security middleware ────────────────────────────────────────────────────────
 app.use(helmet());

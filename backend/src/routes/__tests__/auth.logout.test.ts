@@ -83,7 +83,7 @@ describe('POST /v1/auth/logout — no cookie', () => {
   it('returns 401 TOKEN_EXPIRED when no refresh_token cookie is present', async () => {
     const res = await request(app).post('/v1/auth/logout');
     expect(res.status).toBe(401);
-    expect(res.body).toEqual({ error: 'TOKEN_EXPIRED' });
+    expect(res.body).toMatchObject({ error: 'TOKEN_EXPIRED' });
   });
 });
 
@@ -94,7 +94,7 @@ describe('POST /v1/auth/logout — unknown or expired token', () => {
     mockFindFirst.mockResolvedValue(undefined as never);
     const res = await withCookie('garbage-token');
     expect(res.status).toBe(401);
-    expect(res.body).toEqual({ error: 'TOKEN_EXPIRED' });
+    expect(res.body).toMatchObject({ error: 'TOKEN_EXPIRED' });
   });
 
   it('returns 401 TOKEN_EXPIRED for an already-expired session', async () => {
@@ -105,7 +105,7 @@ describe('POST /v1/auth/logout — unknown or expired token', () => {
 
     const res = await withCookie('expired-token');
     expect(res.status).toBe(401);
-    expect(res.body).toEqual({ error: 'TOKEN_EXPIRED' });
+    expect(res.body).toMatchObject({ error: 'TOKEN_EXPIRED' });
   });
 
   it('does not call db.update for an unknown token', async () => {

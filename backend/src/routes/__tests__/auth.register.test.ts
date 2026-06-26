@@ -164,7 +164,7 @@ describe('POST /v1/auth/register — duplicate email', () => {
   it('returns { error: "EMAIL_ALREADY_EXISTS" }', async () => {
     mockFindFirst.mockResolvedValue({ id: 'existing-id' } as never);
     const res = await request(app).post('/v1/auth/register').send(VALID_BODY);
-    expect(res.body).toEqual({ error: 'EMAIL_ALREADY_EXISTS' });
+    expect(res.body).toMatchObject({ error: 'EMAIL_ALREADY_EXISTS' });
   });
 
   it('does not start a transaction on duplicate', async () => {

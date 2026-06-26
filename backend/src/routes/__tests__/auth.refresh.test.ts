@@ -94,7 +94,7 @@ describe('POST /v1/auth/refresh — no cookie', () => {
   it('returns 401 TOKEN_EXPIRED when no refresh_token cookie is present', async () => {
     const res = await request(app).post('/v1/auth/refresh');
     expect(res.status).toBe(401);
-    expect(res.body).toEqual({ error: 'TOKEN_EXPIRED' });
+    expect(res.body).toMatchObject({ error: 'TOKEN_EXPIRED' });
   });
 
   it('does not query the DB', async () => {
@@ -110,7 +110,7 @@ describe('POST /v1/auth/refresh — unknown token', () => {
     mockFindFirst.mockResolvedValue(undefined as never);
     const res = await withCookie('garbage-token');
     expect(res.status).toBe(401);
-    expect(res.body).toEqual({ error: 'TOKEN_EXPIRED' });
+    expect(res.body).toMatchObject({ error: 'TOKEN_EXPIRED' });
   });
 
   it('clears the cookie', async () => {
@@ -139,7 +139,7 @@ describe('POST /v1/auth/refresh — reuse detection', () => {
     const res = await withCookie('reused-token');
 
     expect(res.status).toBe(401);
-    expect(res.body).toEqual({ error: 'TOKEN_REUSE_DETECTED' });
+    expect(res.body).toMatchObject({ error: 'TOKEN_REUSE_DETECTED' });
   });
 
   it('revokes the entire token family', async () => {
@@ -184,7 +184,7 @@ describe('POST /v1/auth/refresh — expired token', () => {
     const res = await withCookie('expired-token');
 
     expect(res.status).toBe(401);
-    expect(res.body).toEqual({ error: 'TOKEN_EXPIRED' });
+    expect(res.body).toMatchObject({ error: 'TOKEN_EXPIRED' });
   });
 
   it('does not start a rotation transaction on expiry', async () => {

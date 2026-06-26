@@ -15,7 +15,7 @@ import { db }     from '../../db';
 import { users, commStyleEnum } from '../../db/schema';
 import { authenticate }  from '../../middleware/authenticate';
 import { globalRateLimit } from '../../middleware/rateLimit';
-import { validate }      from '../../middleware/validate';
+import { validate, displayNameSchema } from '../../middleware/validate';
 import { AppError }      from '../../lib/errors';
 
 export const usersRouter = Router();
@@ -105,12 +105,7 @@ usersRouter.get('/me', async (req, res, next) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const PatchMeSchema = z.object({
-  display_name: z
-    .string()
-    .min(1,   { message: 'display_name cannot be empty' })
-    .max(100, { message: 'display_name cannot exceed 100 characters' })
-    .trim()
-    .optional(),
+  display_name: displayNameSchema.optional(),
   timezone: z
     .string()
     .min(1,   { message: 'timezone cannot be empty' })

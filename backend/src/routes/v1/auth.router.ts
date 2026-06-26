@@ -16,7 +16,7 @@ import bcrypt      from 'bcryptjs';
 import { eq, and, isNull } from 'drizzle-orm';
 import { db }      from '../../db';
 import { users, authSessions, userContext, userMemoryPins } from '../../db/schema';
-import { validate }     from '../../middleware/validate';
+import { validate, displayNameSchema } from '../../middleware/validate';
 import { authenticate } from '../../middleware/authenticate';
 import { AppError }     from '../../lib/errors';
 import { redis }        from '../../lib/redis';
@@ -61,11 +61,7 @@ const RegisterSchema = z.object({
   password: z
     .string({ required_error: 'password is required' })
     .min(8, { message: 'Password must be at least 8 characters' }),
-  display_name: z
-    .string({ required_error: 'display_name is required' })
-    .trim()
-    .min(1,   { message: 'display_name cannot be empty' })
-    .max(100, { message: 'display_name cannot exceed 100 characters' }),
+  display_name: displayNameSchema,
 });
 
 type RegisterBody = z.infer<typeof RegisterSchema>;

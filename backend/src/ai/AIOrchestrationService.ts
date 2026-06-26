@@ -35,6 +35,11 @@ import {
 } from './llm/errors';
 import type { PromptContext } from './prompts/index';
 import { selectPrompt }      from './prompts/index';
+import { log, warn, logError } from '../lib/logger';
+
+// Default model name logged with every LLM call.  When the provider
+// abstraction supports multiple models, pass it through CompletionRequest.
+const DEFAULT_LLM_MODEL = 'claude-sonnet-4-6';
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -120,9 +125,10 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return Promise.race([promise, timeout]);
 }
 
-/** Writes a structured log line. P1-17 will replace this with a real logger. */
+/** Writes a structured LLM log line via the shared logger. */
 function logLLMCall(fields: {
   prompt_version:  string;
+  llm_model:       string;
   input_tokens?:   number;
   output_tokens?:  number;
   cached_tokens?:  number;
@@ -131,13 +137,7 @@ function logLLMCall(fields: {
   attempt:         number;
   error_code?:     string;
 }): void {
-  console.log(
-    JSON.stringify({
-      event:     'llm_call',
-      timestamp: new Date().toISOString(),
-      ...fields,
-    }),
-  );
+  log({ event: 'llm_call', ...fields });
 }
 
 /** Returns true for errors that are worth retrying. */
@@ -186,6 +186,7 @@ export class AIOrchestrationService {
 
         logLLMCall({
           prompt_version: prompt.version,
+          llm_model:      DEFAULT_LLM_MODEL,
           input_tokens:   response.usage.input_tokens,
           output_tokens:  response.usage.output_tokens,
           cached_tokens:  response.usage.cached_tokens,
@@ -213,6 +214,7 @@ export class AIOrchestrationService {
 
         logLLMCall({
           prompt_version: prompt.version,
+          llm_model:      DEFAULT_LLM_MODEL,
           duration_ms:    durationMs,
           success:        false,
           attempt,
@@ -230,13 +232,11 @@ export class AIOrchestrationService {
 
     // All attempts failed — return the user-facing fallback so the message
     // endpoint can stream it to the client without special error handling.
-    console.warn(
-      JSON.stringify({
-        event:     'llm_call_exhausted',
-        timestamp: new Date().toISOString(),
-        error:     lastError instanceof Error ? lastError.message : String(lastError),
-      }),
-    );
+    warn({
+      event:     'llm_call_exhausted',
+      llm_model: DEFAULT_LLM_MODEL,
+      error:     lastError instanceof Error ? lastError.message : String(lastError),
+    });
 
     return {
       content:       RATE_LIMIT_USER_MESSAGE,
@@ -274,6 +274,7 @@ export class AIOrchestrationService {
 
       logLLMCall({
         prompt_version: prompt.version,
+        llm_model:      DEFAULT_LLM_MODEL,
         duration_ms:    Date.now() - startedAt,
         success:        true,
         attempt:        0,
@@ -281,6 +282,7 @@ export class AIOrchestrationService {
     } catch (err) {
       logLLMCall({
         prompt_version: prompt.version,
+        llm_model:      DEFAULT_LLM_MODEL,
         duration_ms:    Date.now() - startedAt,
         success:        false,
         attempt:        0,

@@ -231,7 +231,7 @@ describe('POST /v1/auth/memory-pin/verify', () => {
         .send({ pin: '1234' });
 
       expect(res.status).toBe(429);
-      expect(res.body).toEqual({ error: 'PIN_LOCKED' });
+      expect(res.body).toMatchObject({ error: 'PIN_LOCKED' });
       expect(mockFindFirst).not.toHaveBeenCalled();
     });
   });
@@ -247,7 +247,7 @@ describe('POST /v1/auth/memory-pin/verify', () => {
         .send({ pin: '1234' });
 
       expect(res.status).toBe(404);
-      expect(res.body).toEqual({ error: 'PIN_NOT_SET' });
+      expect(res.body).toMatchObject({ error: 'PIN_NOT_SET' });
     });
 
     it('does not count toward the failure counter', async () => {
@@ -329,7 +329,7 @@ describe('POST /v1/auth/memory-pin/verify', () => {
         .send({ pin: '9999' });
 
       expect(res.status).toBe(401);
-      expect(res.body).toEqual({ error: 'INVALID_PIN' });
+      expect(res.body).toMatchObject({ error: 'INVALID_PIN' });
     });
 
     it('sets a 10-minute expiry on the failure counter after the first failure', async () => {
@@ -374,7 +374,7 @@ describe('POST /v1/auth/memory-pin/verify', () => {
         .send({ pin: '9999' });
 
       expect(res.status).toBe(429);
-      expect(res.body).toEqual({ error: 'PIN_LOCKED' });
+      expect(res.body).toMatchObject({ error: 'PIN_LOCKED' });
     });
 
     it('sets pin_lock with a 15-minute TTL on the 3rd failure', async () => {
