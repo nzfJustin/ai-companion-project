@@ -43,9 +43,11 @@ import { AppError }          from '../../lib/errors';
 import { EncryptionService } from '../../services/EncryptionService';
 import { AIOrchestrationService } from '../../ai/AIOrchestrationService';
 import { AnthropicProvider } from '../../ai/llm/AnthropicProvider';
-import { LLMTimeoutError, LLMStreamError } from '../../ai/llm/errors';
+import { LLMTimeoutError } from '../../ai/llm/errors';
 import type { Message }      from '../../ai/llm/types';
 import { warn }              from '../../lib/logger';
+import { enqueueExtractionJob } from '../../jobs';
+import type { PgBoss } from 'pg-boss';
 
 // ─── Router + global middleware ────────────────────────────────────────────────
 
@@ -75,6 +77,13 @@ function getOrchestrator(): AIOrchestrationService {
 // Allow injection in tests
 export function setOrchestrator(o: AIOrchestrationService): void {
   _orchestrator = o;
+}
+
+// ─── pg-boss job queue (injected at startup) ───────────────────────────────────
+
+let _jobQueue: PgBoss | null = null;
+export function setJobQueue(boss: PgBoss): void {
+  _jobQueue = boss;
 }
 
 // ─── In-memory SSE buffer for Last-Event-ID reconnection ──────────────────────
@@ -282,7 +291,11 @@ conversationsRouter.patch(
         .where(eq(conversations.id, id))
         .returning();
 
-      // TODO (P1-19): await jobQueue.send('memory_extraction', { conversationId: id, userId: req.userId! });
+      if (_jobQueue) {
+        void enqueueExtractionJob(_jobQueue, { conversation_id: id, user_id: req.userId! });
+      } else {
+        warn({ event: 'extraction_enqueue_skipped_no_queue', conversation_id: id });
+      }
 
       return res.status(200).json({
         id:         updated.id,

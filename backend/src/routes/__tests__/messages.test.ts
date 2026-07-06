@@ -20,7 +20,7 @@ const mockDbTransaction = jest.fn();
 const mockRedis         = { lrange: jest.fn(), pipeline: jest.fn() };
 const mockEncrypt       = jest.fn();
 const mockDecrypt       = jest.fn();
-const mockStream        = jest.fn();
+const _mockStream       = jest.fn();
 
 jest.mock('../../db', () => ({
   db: {
@@ -104,14 +104,14 @@ function setupRedisMock(cachedMessages: unknown[] = []) {
 
 // ── DB mock helpers ────────────────────────────────────────────────────────────
 
-function setupInsertMock() {
+function _setupInsertMock() {
   const returning = jest.fn().mockResolvedValue([{ id: 'msg-uuid-001' }]);
   const values    = jest.fn().mockReturnValue({ returning });
   mockDbInsert.mockReturnValue({ values });
   return { values, returning };
 }
 
-function setupUpdateMock() {
+function _setupUpdateMock() {
   const where     = jest.fn().mockResolvedValue(undefined);
   const set       = jest.fn().mockReturnValue({ where });
   mockDbUpdate.mockReturnValue({ set });
