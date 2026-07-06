@@ -35,7 +35,7 @@ import {
 } from './llm/errors';
 import type { PromptContext } from './prompts/index';
 import { selectPrompt }      from './prompts/index';
-import { log, warn, logError } from '../lib/logger';
+import { log, warn } from '../lib/logger';
 
 // Default model name logged with every LLM call.  When the provider
 // abstraction supports multiple models, pass it through CompletionRequest.

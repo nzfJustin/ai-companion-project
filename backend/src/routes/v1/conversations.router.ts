@@ -43,11 +43,11 @@ import { AppError }          from '../../lib/errors';
 import { EncryptionService } from '../../services/EncryptionService';
 import { AIOrchestrationService } from '../../ai/AIOrchestrationService';
 import { AnthropicProvider } from '../../ai/llm/AnthropicProvider';
-import { LLMTimeoutError, LLMStreamError } from '../../ai/llm/errors';
+import { LLMTimeoutError } from '../../ai/llm/errors';
 import type { Message }      from '../../ai/llm/types';
 import { warn }              from '../../lib/logger';
 import { enqueueExtractionJob } from '../../jobs';
-import { PgBoss } from 'pg-boss';
+import type { PgBoss } from 'pg-boss';
 
 // ─── Router + global middleware ────────────────────────────────────────────────
 
