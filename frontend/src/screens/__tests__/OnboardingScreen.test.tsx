@@ -34,7 +34,7 @@ const ONBOARDED_FALSE = {
 
 const ONBOARDED_TRUE = { ...ONBOARDED_FALSE, onboarding_done: true };
 
-const NEW_CONV = { id: 'conv-abc', started_at: '2026-01-01T00:00:00Z', status: 'active' as const };
+const NEW_CONV = { id: 'conv-abc', started_at: '2026-01-01T00:00:00Z', ended_at: null, status: 'active' as const, message_count: 0 };
 
 // ── Helper ─────────────────────────────────────────────────────────────────────
 
