@@ -14,11 +14,12 @@
  */
 
 import { createBrowserRouter, Navigate } from 'react-router-dom';
-import { ProtectedRoute } from './components/ProtectedRoute';
-import { AppShell }       from './components/AppShell';
+import { ProtectedRoute }   from './components/ProtectedRoute';
+import { AppShell }         from './components/AppShell';
 import { LoginScreen }      from './screens/LoginScreen';
 import { RegisterScreen }   from './screens/RegisterScreen';
 import { OnboardingScreen } from './screens/OnboardingScreen';
+import { ChatScreen }       from './screens/ChatScreen';
 import { PlaceholderScreen } from './screens/PlaceholderScreen';
 
 export const router = createBrowserRouter([
@@ -37,8 +38,8 @@ export const router = createBrowserRouter([
       {
         element: <AppShell />,
         children: [
-          { path: '/chat',                 element: <PlaceholderScreen name="/chat" /> },
-          { path: '/chat/:conversationId', element: <PlaceholderScreen name="/chat/:conversationId" /> },
+          { path: '/chat',                 element: <ChatScreen /> },
+          { path: '/chat/:conversationId', element: <ChatScreen /> },
           { path: '/memories',             element: <PlaceholderScreen name="/memories" /> },
           { path: '/memories/:id',         element: <PlaceholderScreen name="/memories/:id" /> },
           { path: '/trends',               element: <PlaceholderScreen name="/trends" /> },
