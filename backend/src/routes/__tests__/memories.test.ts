@@ -78,7 +78,7 @@ const MEMORY_L1 = {
 
 const MEMORY_L4 = { ...MEMORY_L1, id: 'mem-4', level: 4, title: 'Sensitive memory' };
 const MEMORY_L5 = { ...MEMORY_L1, id: 'mem-5', level: 5, title: 'Most sensitive' };
-const DELETED_MEMORY = { ...MEMORY_L1, id: 'mem-del', deletedAt: new Date() };
+const _DELETED_MEMORY = { ...MEMORY_L1, id: 'mem-del', deletedAt: new Date() };
 
 function setupUpdateMock() {
   const returning = jest.fn().mockResolvedValue([{ id: MEMORY_L1.id, level: 3 }]);
