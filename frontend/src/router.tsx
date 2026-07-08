@@ -16,8 +16,9 @@
 import { createBrowserRouter, Navigate } from 'react-router-dom';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { AppShell }       from './components/AppShell';
-import { LoginScreen }    from './screens/LoginScreen';
-import { RegisterScreen } from './screens/RegisterScreen';
+import { LoginScreen }      from './screens/LoginScreen';
+import { RegisterScreen }   from './screens/RegisterScreen';
+import { OnboardingScreen } from './screens/OnboardingScreen';
 import { PlaceholderScreen } from './screens/PlaceholderScreen';
 
 export const router = createBrowserRouter([
@@ -29,8 +30,8 @@ export const router = createBrowserRouter([
   {
     element: <ProtectedRoute />,
     children: [
-      // Onboarding: auth-required but no nav shell (user hasn't completed setup yet)
-      { path: '/onboarding', element: <PlaceholderScreen name="/onboarding" /> },
+      // Onboarding: auth-required, no nav shell, has its own redirect guard
+      { path: '/onboarding', element: <OnboardingScreen /> },
 
       // Shell routes: auth-required + persistent sidebar/bottom nav
       {
