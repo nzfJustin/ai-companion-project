@@ -285,3 +285,208 @@ describe('relativeTime', () => {
     expect(result).toMatch(/Jan/i);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F1-006 — SSE Streaming tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+import { API_BASE_URL } from '../../api/config';
+
+vi.mock('../../api/config', () => ({ API_BASE_URL: 'http://test.local' }));
+vi.mock('../../store/authStore', () => ({
+  useAuthStore:    vi.fn(() => ({ accessToken: 'test-token', setAccessToken: vi.fn(), clear: vi.fn() })),
+  getAccessToken:  vi.fn(() => 'test-token'),
+  setAccessTokenDirect: vi.fn(),
+  clearAuth:       vi.fn(),
+}));
+
+const ENC = new TextEncoder();
+
+function makeSseStream(frames: string[]): ReadableStream<Uint8Array> {
+  return new ReadableStream({
+    start(controller) {
+      for (const frame of frames) controller.enqueue(ENC.encode(frame));
+      controller.close();
+    },
+  });
+}
+
+function makeTokenStream(tokens: string[], messageId = 'msg-1', emotion = 'calm') {
+  const frames = [
+    ...tokens.map((t, i) => `id: ${i + 1}\nevent: token\ndata: {"delta":"${t}"}\n\n`),
+    `event: done\ndata: {"message_id":"${messageId}","emotion_tags":{"primary":"${emotion}","score":0.8}}\n\n`,
+  ];
+  return makeSseStream(frames);
+}
+
+function makeErrorStream(code = 'LLM_STREAM_ERROR') {
+  return makeSseStream([`event: error\ndata: {"code":"${code}"}\n\n`]);
+}
+
+function makeFetchMock(stream: ReadableStream<Uint8Array>) {
+  return vi.fn().mockResolvedValue({
+    ok:   true,
+    body: stream,
+  });
+}
+
+describe('F1-006 — SSE streaming in ConversationView', () => {
+  beforeEach(() => {
+    vi.mocked(getConversation).mockReset();
+    vi.mocked(getConversation).mockResolvedValue(CONV_DETAIL);
+  });
+
+  async function renderAndLoad() {
+    renderChat('/chat/c-1');
+    // Wait for history to load
+    await screen.findByText('Hello there');
+    return screen.getByRole('textbox', { name: /message input/i }) as HTMLTextAreaElement;
+  }
+
+  it('uses fetch (not EventSource) when sending a message', async () => {
+    const fetchMock = makeFetchMock(makeTokenStream(['Hi!']));
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+
+    const textarea = await renderAndLoad();
+    await user.type(textarea, 'Test message');
+    await user.keyboard('{Enter}');
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toContain('/v1/conversations/c-1/messages');
+    expect((init as RequestInit).headers).toMatchObject({
+      Authorization: 'Bearer test-token',
+    });
+    expect(window.EventSource).toBeUndefined(); // EventSource never used
+  });
+
+  it('shows typing indicator (three-dot) before first token arrives', async () => {
+    let resolveStream!: () => void;
+    const stream = new ReadableStream({
+      start() {/* never sends anything */},
+      cancel() { resolveStream?.(); },
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, body: stream }));
+    const user = userEvent.setup();
+
+    const textarea = await renderAndLoad();
+    await user.type(textarea, 'Hello');
+    await user.keyboard('{Enter}');
+
+    // Typing indicator should appear (three-dot animation)
+    await waitFor(() =>
+      expect(screen.getByLabelText('AI is typing')).toBeInTheDocument(),
+    );
+  });
+
+  it('replaces typing indicator with content as tokens arrive', async () => {
+    vi.stubGlobal('fetch', makeFetchMock(makeTokenStream(['Hello', ' there!'])));
+    const user = userEvent.setup();
+
+    const textarea = await renderAndLoad();
+    await user.type(textarea, 'Hi');
+    await user.keyboard('{Enter}');
+
+    // The accumulated text should appear
+    await waitFor(() =>
+      expect(screen.getByText('Hello there!')).toBeInTheDocument(),
+    );
+  });
+
+  it('shows emotion pill after event:done', async () => {
+    vi.stubGlobal('fetch', makeFetchMock(makeTokenStream(['Nice!'], 'msg-99', 'joy')));
+    const user = userEvent.setup();
+
+    const textarea = await renderAndLoad();
+    await user.type(textarea, 'Hi');
+    await user.keyboard('{Enter}');
+
+    await waitFor(() =>
+      expect(screen.getByLabelText(/detected emotion: joy/i)).toBeInTheDocument(),
+    );
+  });
+
+  it('re-enables composer after event:done', async () => {
+    vi.stubGlobal('fetch', makeFetchMock(makeTokenStream(['Done.'])));
+    const user = userEvent.setup();
+
+    const textarea = await renderAndLoad();
+    await user.type(textarea, 'Hi');
+    await user.keyboard('{Enter}');
+
+    // After stream completes, textarea should be enabled again
+    await waitFor(() => expect(textarea).not.toBeDisabled());
+  });
+
+  it('removes AI bubble on event:error and shows the inline error', async () => {
+    vi.stubGlobal('fetch', makeFetchMock(makeErrorStream('LLM_STREAM_ERROR')));
+    const user = userEvent.setup();
+
+    const textarea = await renderAndLoad();
+    await user.type(textarea, 'Hello');
+    await user.keyboard('{Enter}');
+
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        /couldn't get a response/i,
+      ),
+    );
+    // Typing indicator / partial bubble should be gone
+    expect(screen.queryByLabelText('AI is typing')).not.toBeInTheDocument();
+  });
+
+  it('restores the original message in the input on error', async () => {
+    vi.stubGlobal('fetch', makeFetchMock(makeErrorStream()));
+    const user = userEvent.setup();
+
+    const textarea = await renderAndLoad();
+    await user.type(textarea, 'My original message');
+    await user.keyboard('{Enter}');
+
+    await waitFor(() =>
+      expect(textarea).toHaveValue('My original message'),
+    );
+  });
+
+  it('re-enables composer after event:error', async () => {
+    vi.stubGlobal('fetch', makeFetchMock(makeErrorStream('LLM_TIMEOUT')));
+    const user = userEvent.setup();
+
+    const textarea = await renderAndLoad();
+    await user.type(textarea, 'Test');
+    await user.keyboard('{Enter}');
+
+    await waitFor(() => expect(textarea).not.toBeDisabled());
+  });
+
+  it('treats a network drop (fetch rejection) the same as event:error', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+    const user = userEvent.setup();
+
+    const textarea = await renderAndLoad();
+    await user.type(textarea, 'Test');
+    await user.keyboard('{Enter}');
+
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent(/couldn't get a response/i),
+    );
+    await waitFor(() => expect(textarea).toHaveValue('Test'));
+  });
+
+  it('keeps the user message visible after an error (backend already persisted it)', async () => {
+    vi.stubGlobal('fetch', makeFetchMock(makeErrorStream()));
+    const user = userEvent.setup();
+
+    const textarea = await renderAndLoad();
+    await user.type(textarea, 'A message');
+    await user.keyboard('{Enter}');
+
+    // Wait for error
+    await waitFor(() => screen.getByRole('alert'));
+
+    // The optimistic user bubble should still be in the list
+    const bubbles = screen.getAllByText('A message');
+    expect(bubbles.length).toBeGreaterThanOrEqual(1); // bubble + possibly restored draft
+  });
+});
