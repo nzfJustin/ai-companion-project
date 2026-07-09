@@ -6,19 +6,28 @@
  *   /chat                    — conversation list (history + new conversation CTA)
  *   /chat/:conversationId    — message display + composer for a specific conversation
  *
- * F1-005 acceptance criteria (static aspects — streaming is F1-006):
- *
+ * F1-005 acceptance criteria (static aspects):
  *   ✓ Message list renders history chronologically; user right-aligned,
  *     assistant left-aligned, each with a relative timestamp.
- *   ✓ Auto-scroll to bottom on new message only if user is already near
- *     the bottom. If scrolled up, shows a "New message ↓" pill.
- *   ✓ Composer: textarea grows to 5 lines, Enter submits, Shift+Enter
- *     newlines, disabled while AI response is in progress or history loads.
- *   ✓ Character counter: visible within 200 chars of 2,000 limit, amber
- *     at 1,800, red at 1,950+, blocks submit when over limit or empty.
+ *   ✓ Auto-scroll to bottom on new message only if user is already near bottom.
+ *     If scrolled up, shows a "New message ↓" pill.
+ *   ✓ Composer: textarea grows to 5 lines, Enter submits, Shift+Enter newlines,
+ *     disabled while AI response is in progress or history loads.
+ *   ✓ Character counter within 200 chars of 2,000 limit (amber → red).
  *   ✓ Loading skeleton during initial fetch; composer disabled until ready.
- *   ✓ /chat (no id) shows conversation history with a "New conversation"
- *     primary button and per-card emotion chip (if available).
+ *
+ * F1-006 acceptance criteria (SSE streaming):
+ *   ✓ Sends via fetch with Authorization: Bearer <token> — NOT EventSource.
+ *   ✓ Three-dot typing indicator appears before first token; replaced token
+ *     by token as event:token frames arrive (data.delta appended in real time).
+ *   ✓ event:done → finalises AI bubble with real message_id + emotion pill,
+ *     composer re-enables.
+ *   ✓ event:error (LLM_STREAM_ERROR / LLM_TIMEOUT) → removes bubble, shows
+ *     inline error "Couldn't get a response — please try again", restores
+ *     original message in the input.
+ *   ✓ Network drop (fetch abort) → same error recovery path as event:error.
+ *   ✓ User's message is never lost — it was persisted by the backend before
+ *     the stream began.
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
@@ -33,12 +42,27 @@ import {
   createConversation,
   type MessageResponse,
 } from '../api/conversations';
+import { parseSSE } from '../api/sseParser';
+import { API_BASE_URL } from '../api/config';
+import { getAccessToken } from '../store/authStore';
 import { relativeTime } from '../utils/time';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-/** Distance from the bottom (px) within which we consider the user "at the bottom" */
 const SCROLL_NEAR_BOTTOM_PX = 80;
+
+// ─── Streaming state ──────────────────────────────────────────────────────────
+// Kept separate from the messages array so the list of "real" messages stays
+// clean; the streaming bubble is appended to the rendered list only.
+
+interface StreamBubble {
+  /** Temporary client-side ID while the stream is in progress */
+  id:       string;
+  /** Accumulated text from event:token frames so far */
+  content:  string;
+  /** True until the first token arrives; renders the three-dot indicator */
+  isTyping: boolean;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Conversation List (/chat — no conversationId)
@@ -124,7 +148,7 @@ function ConversationList() {
                 </div>
                 <p className="mt-0.5 text-xs text-gray-500">
                   {conv.message_count} message{conv.message_count !== 1 ? 's' : ''}
-                  {conv.status === 'closed' && ' · Ended'}
+                  {conv.status === 'closed'     && ' · Ended'}
                   {conv.status === 'summarized' && ' · Summarised'}
                 </p>
               </div>
@@ -141,32 +165,30 @@ function ConversationList() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function ConversationView({ conversationId }: { conversationId: string }) {
-
   // ── State ────────────────────────────────────────────────────────────────────
-  const [draft, setDraft]           = useState('');
-  const [messages, setMessages]     = useState<MessageResponse[]>([]);
-  const [isStreaming, setIsStreaming] = useState(false);
-  const [showNewPill, setShowNewPill] = useState(false);
+  const [draft,        setDraft]        = useState('');
+  const [messages,     setMessages]     = useState<MessageResponse[]>([]);
+  const [streamBubble, setStreamBubble] = useState<StreamBubble | null>(null);
+  const [streamError,  setStreamError]  = useState<string | null>(null);
+  const [isStreaming,  setIsStreaming]   = useState(false);
+  const [showNewPill,  setShowNewPill]  = useState(false);
 
-  const listRef       = useRef<HTMLDivElement>(null);
-  const bottomRef     = useRef<HTMLDivElement>(null);
-  const atBottomRef   = useRef(true);
+  const listRef     = useRef<HTMLDivElement>(null);
+  const bottomRef   = useRef<HTMLDivElement>(null);
+  const atBottomRef = useRef(true);
 
-  // ── Load conversation ─────────────────────────────────────────────────────────
+  // ── Load conversation ──────────────────────────────────────────────────────
   const { data: conv, isLoading } = useQuery({
     queryKey: ['conversation', conversationId],
     queryFn:  () => getConversation(conversationId),
     staleTime: 5_000,
   });
 
-  // Populate messages from query result
   useEffect(() => {
-    if (conv?.messages) {
-      setMessages(conv.messages);
-    }
+    if (conv?.messages) setMessages(conv.messages);
   }, [conv]);
 
-  // ── Auto-scroll logic ─────────────────────────────────────────────────────────
+  // ── Auto-scroll ───────────────────────────────────────────────────────────
 
   function checkAtBottom() {
     const el = listRef.current;
@@ -178,24 +200,16 @@ function ConversationView({ conversationId }: { conversationId: string }) {
     if (bottomRef.current?.scrollIntoView) bottomRef.current.scrollIntoView({ behavior });
   }
 
-  // On new messages: scroll if already at bottom, otherwise show pill
   const prevLenRef = useRef(0);
   useEffect(() => {
     if (messages.length <= prevLenRef.current) return;
     prevLenRef.current = messages.length;
-
-    if (atBottomRef.current) {
-      scrollToBottom();
-    } else {
-      setShowNewPill(true);
-    }
+    if (atBottomRef.current) scrollToBottom();
+    else setShowNewPill(true);
   }, [messages.length]);
 
-  // Initial scroll to bottom (without animation) when history loads
   useEffect(() => {
-    if (!isLoading && messages.length > 0) {
-      scrollToBottom('instant');
-    }
+    if (!isLoading && messages.length > 0) scrollToBottom('instant');
   }, [isLoading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleScroll() {
@@ -203,60 +217,120 @@ function ConversationView({ conversationId }: { conversationId: string }) {
     if (atBottomRef.current) setShowNewPill(false);
   }
 
-  // ── Send message (stub for F1-006 SSE — posts via apiFetch for now) ──────────
-  // F1-006 will replace the body of handleSend with the SSE streaming flow.
-  // The state management (optimistic user message, isStreaming flag, ai bubble)
-  // is already in place here so F1-006 only needs to swap out the network call.
+  // ── Send message — SSE streaming (F1-006) ─────────────────────────────────
+  //
+  // Uses fetch + ReadableStream to parse SSE frames from the backend.
+  // EventSource is intentionally NOT used here: it cannot send custom headers,
+  // so the Authorization: Bearer token cannot be attached.
+  //
+  // Frame handling:
+  //   event:token  → accumulate delta into streamBubble
+  //   event:done   → move streamBubble into messages[], show emotion pill
+  //   event:error  → remove streamBubble, show inline error, restore draft
+  //   fetch error  → same recovery path as event:error
+
   const handleSend = useCallback(async () => {
     if (!draft.trim() || draft.length > 2_000 || isStreaming) return;
     if (conv?.status !== 'active') return;
 
     const userContent = draft.trim();
     setDraft('');
+    setStreamError(null);
     setIsStreaming(true);
 
-    // Optimistic user message
-    const optimisticUser: MessageResponse = {
-      id:           `optimistic-${Date.now()}`,
-      role:         'user',
-      content:      userContent,
-      emotion_tags: null,
-      created_at:   new Date().toISOString(),
-    };
-    setMessages((prev) => [...prev, optimisticUser]);
+    // 1. Optimistic user message (backend already persisted it before streaming)
+    setMessages((prev) => [
+      ...prev,
+      {
+        id:           `optimistic-${Date.now()}`,
+        role:         'user',
+        content:      userContent,
+        emotion_tags: null,
+        created_at:   new Date().toISOString(),
+      },
+    ]);
 
-    // Typing indicator bubble (placeholder for F1-006 SSE)
-    const typingId = `typing-${Date.now()}`;
-    const typingBubble: MessageResponse & { isTyping: boolean } = {
-      id:           typingId,
-      role:         'assistant',
-      content:      '',
-      emotion_tags: null,
-      created_at:   new Date().toISOString(),
-      isTyping:     true,
-    };
-    setMessages((prev) => [...prev, typingBubble as unknown as MessageResponse]);
+    // 2. Show typing indicator bubble immediately (before first token)
+    const tempId = `typing-${Date.now()}`;
+    setStreamBubble({ id: tempId, content: '', isTyping: true });
 
-    // ── F1-006: Replace this block with the SSE fetch stream ──────────────────
-    // For now this is a placeholder that removes the typing indicator after a
-    // short delay so the UI shell is functional for testing. F1-006 will
-    // stream real AI tokens into the typing bubble and then swap it to a real
-    // assistant message on event:done.
+    let accumulated = '';
+
     try {
-      await new Promise((r) => setTimeout(r, 800));
-      setMessages((prev) =>
-        prev.filter((m) => (m as { id: string }).id !== typingId),
+      // ── Fetch — Authorization header injected manually (can't use apiFetch
+      //    here because we need raw ReadableStream access, not parsed JSON) ──
+      const token = getAccessToken();
+      const response = await fetch(
+        `${API_BASE_URL}/v1/conversations/${conversationId}/messages`,
+        {
+          method:      'POST',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({ content: userContent }),
+        },
       );
-      // F1-006 will append the completed AI message here
+
+      if (!response.ok || !response.body) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      // ── Parse SSE frames ──────────────────────────────────────────────────
+      for await (const frame of parseSSE(response.body)) {
+        if (frame.event === 'token') {
+          const { delta } = JSON.parse(frame.data) as { delta: string };
+          accumulated += delta;
+          // Replace typing indicator with accumulating content
+          setStreamBubble({ id: tempId, content: accumulated, isTyping: false });
+
+        } else if (frame.event === 'done') {
+          const done = JSON.parse(frame.data) as {
+            message_id:   string;
+            emotion_tags: { primary: string; score: number };
+          };
+          // Move the completed message into the persistent list
+          setMessages((prev) => [
+            ...prev,
+            {
+              id:           done.message_id,
+              role:         'assistant',
+              content:      accumulated,
+              emotion_tags: done.emotion_tags,
+              created_at:   new Date().toISOString(),
+            },
+          ]);
+          setStreamBubble(null);
+          return; // success — finally still runs
+
+        } else if (frame.event === 'error') {
+          const { code } = JSON.parse(frame.data) as { code: string };
+          throw new Error(code); // caught below → error recovery path
+        }
+      }
+
+      // Stream ended without a done event — treat as an error
+      throw new Error('LLM_STREAM_ERROR');
+
+    } catch {
+      // ── Error recovery (covers event:error AND network drops) ──────────────
+      // Per spec: remove the incomplete AI bubble, show an inline notice, and
+      // restore the user's original message in the composer input.
+      // The user's message is NOT removed — it was already persisted by the
+      // backend before the stream began.
+      setStreamBubble(null);
+      setStreamError("Couldn't get a response — please try again.");
+      setDraft(userContent);
+
     } finally {
       setIsStreaming(false);
     }
-    // ──────────────────────────────────────────────────────────────────────────
-  }, [draft, isStreaming, conv]);
+  }, [draft, isStreaming, conv, conversationId]);
 
-  // ── Render ───────────────────────────────────────────────────────────────────
+  // ── Render ────────────────────────────────────────────────────────────────
 
-  const isClosed   = conv?.status === 'closed' || conv?.status === 'summarized';
+  const isClosed         = conv?.status === 'closed' || conv?.status === 'summarized';
   const composerDisabled = isLoading || isClosed;
 
   return (
@@ -271,6 +345,7 @@ function ConversationView({ conversationId }: { conversationId: string }) {
           <MessageSkeleton />
         ) : (
           <div className="flex flex-col gap-4 px-4 py-4">
+            {/* Persisted messages */}
             {messages.map((msg) => (
               <MessageBubble
                 key={msg.id}
@@ -278,9 +353,28 @@ function ConversationView({ conversationId }: { conversationId: string }) {
                 content={msg.content}
                 createdAt={msg.created_at}
                 emotionTag={msg.emotion_tags}
-                isTyping={(msg as { isTyping?: boolean }).isTyping}
               />
             ))}
+
+            {/* In-progress streaming bubble (three-dot then accumulating text) */}
+            {streamBubble && (
+              <MessageBubble
+                role="assistant"
+                content={streamBubble.content}
+                createdAt={new Date().toISOString()}
+                isTyping={streamBubble.isTyping}
+              />
+            )}
+
+            {/* Inline stream error notice */}
+            {streamError && (
+              <p
+                role="alert"
+                className="py-2 text-center text-sm text-red-500"
+              >
+                {streamError}
+              </p>
+            )}
 
             {/* Closed conversation notice */}
             {isClosed && (
@@ -299,10 +393,7 @@ function ConversationView({ conversationId }: { conversationId: string }) {
       {showNewPill && (
         <div className="absolute bottom-24 left-1/2 -translate-x-1/2">
           <button
-            onClick={() => {
-              scrollToBottom();
-              setShowNewPill(false);
-            }}
+            onClick={() => { scrollToBottom(); setShowNewPill(false); }}
             className="flex items-center gap-1.5 rounded-full bg-slate-700 px-3 py-1.5 text-xs font-medium text-white shadow-md"
           >
             New message ↓
