@@ -31,21 +31,19 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useParams } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { MessageBubble }   from '../components/MessageBubble';
 import { MessageSkeleton } from '../components/MessageSkeleton';
 import { MessageComposer } from '../components/MessageComposer';
+import { ConversationHistoryScreen } from './ConversationHistoryScreen';
 import {
   getConversation,
-  listConversations,
-  createConversation,
   type MessageResponse,
 } from '../api/conversations';
-import { parseSSE } from '../api/sseParser';
-import { API_BASE_URL } from '../api/config';
+import { parseSSE }       from '../api/sseParser';
+import { API_BASE_URL }   from '../api/config';
 import { getAccessToken } from '../store/authStore';
-import { relativeTime } from '../utils/time';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -64,101 +62,7 @@ interface StreamBubble {
   isTyping: boolean;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Conversation List (/chat — no conversationId)
-// ─────────────────────────────────────────────────────────────────────────────
-
-function ConversationList() {
-  const navigate     = useNavigate();
-  const queryClient  = useQueryClient();
-
-  const { data, isLoading } = useQuery({
-    queryKey: ['conversations'],
-    queryFn:  () => listConversations(1, 20),
-  });
-
-  const newConvMutation = useMutation({
-    mutationFn: createConversation,
-    onSuccess: (conv) => {
-      queryClient.invalidateQueries({ queryKey: ['conversations'] });
-      navigate(`/chat/${conv.id}`);
-    },
-  });
-
-  return (
-    <div className="flex h-full flex-col">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-gray-100 px-4 py-4">
-        <h1 className="text-base font-semibold text-gray-900">Conversations</h1>
-        <button
-          onClick={() => newConvMutation.mutate()}
-          disabled={newConvMutation.isPending}
-          className="flex items-center gap-1.5 rounded-lg bg-slate-700 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
-        >
-          {newConvMutation.isPending ? (
-            <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" aria-hidden="true" />
-          ) : (
-            <span aria-hidden="true">+</span>
-          )}
-          New conversation
-        </button>
-      </div>
-
-      {/* List */}
-      <div className="flex-1 overflow-y-auto">
-        {isLoading && (
-          <div className="p-4" role="status" aria-label="Loading conversations…">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="mb-3 h-16 animate-pulse rounded-xl bg-gray-100" />
-            ))}
-          </div>
-        )}
-
-        {!isLoading && data?.conversations.length === 0 && (
-          <div className="flex flex-col items-center justify-center gap-3 p-12 text-center">
-            <p className="text-sm text-gray-500">No conversations yet.</p>
-            <button
-              onClick={() => newConvMutation.mutate()}
-              className="rounded-lg bg-slate-700 px-4 py-2 text-sm font-medium text-white"
-            >
-              Start your first conversation
-            </button>
-          </div>
-        )}
-
-        {data?.conversations.map((conv) => {
-          const isActive = conv.status === 'active';
-          return (
-            <Link
-              key={conv.id}
-              to={`/chat/${conv.id}`}
-              className="flex items-start justify-between gap-3 border-b border-gray-50 px-4 py-3.5 hover:bg-gray-50"
-            >
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  {isActive && (
-                    <span
-                      className="h-2 w-2 shrink-0 rounded-full bg-green-400"
-                      aria-label="Active conversation"
-                    />
-                  )}
-                  <span className="truncate text-sm font-medium text-gray-900">
-                    {relativeTime(conv.started_at)}
-                  </span>
-                </div>
-                <p className="mt-0.5 text-xs text-gray-500">
-                  {conv.message_count} message{conv.message_count !== 1 ? 's' : ''}
-                  {conv.status === 'closed'     && ' · Ended'}
-                  {conv.status === 'summarized' && ' · Summarised'}
-                </p>
-              </div>
-            </Link>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
+// ConversationList is now ConversationHistoryScreen (see src/screens/ConversationHistoryScreen.tsx)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Conversation View (/chat/:conversationId)
@@ -426,7 +330,7 @@ export function ChatScreen() {
     <div className="relative flex h-full flex-col">
       {conversationId
         ? <ConversationView conversationId={conversationId} />
-        : <ConversationList />}
+        : <ConversationHistoryScreen />}
     </div>
   );
 }

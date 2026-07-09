@@ -110,6 +110,7 @@ memoriesRouter.get('/', async (req, res, next) => {
       offset,
       columns: {
         id:              true,
+        conversationId:  true,
         title:           true,
         level:           true,
         dominantEmotion: true,
@@ -126,6 +127,7 @@ memoriesRouter.get('/', async (req, res, next) => {
     return res.status(200).json({
       memories: items.map((m) => ({
         id:               m.id,
+        conversation_id:  m.conversationId,
         title:            m.title,
         level:            m.level,
         dominant_emotion: m.dominantEmotion,
