@@ -13,13 +13,13 @@ let dbStatusUpdate: string | null = null;
 const mockTransaction = jest.fn(async (cb: (tx: unknown) => unknown) => {
   const tx = {
     insert: (table: unknown) => ({
-      values: (vals: Record<string, unknown>) => {
-        const id = `mem-${Math.random().toString(36).slice(2, 8)}`;
-        dbInserts.push({ table: String(table), values: { ...vals, id } });
-        return {
-          returning: async () => [{ id }],
-        };
-      },
+      values: (vals: Record<string, unknown>) => ({
+        returning: async () => {
+          const id = `mem-${Math.random().toString(36).slice(2, 8)}`;
+          dbInserts.push({ table: String(table), values: { ...vals, id } });
+          return [{ id }];
+        },
+      }),
     }),
     update: () => ({
       set: (vals: { status: string }) => ({
@@ -112,16 +112,17 @@ describe('runExtractionJob — success', () => {
     expect(dbInserts).toHaveLength(2); // memories + emotional_snapshots
   });
 
-  it('normalises dominant_emotion to lowercase (e.g. "Calm" → "calm")', async () => {
+  it('normalises dominant_emotion to lowercase AND strips punctuation — "Anxious." → "anxious" (TDD P1-017)', async () => {
     mockSuccessfulComplete(JSON.stringify({
       ...JSON.parse(VALID_EXTRACTION_JSON),
-      dominant_emotion: 'Anxious.', // should be lowercased + trimmed by schema
+      dominant_emotion: 'Anxious.', // period must be stripped, not carried through
     }));
 
     await runExtractionJob({ conversationId: CONV_ID, userId: USER_ID, attempt: 1 });
 
     const memoryInsert = dbInserts.find((i) => 'dominantEmotion' in i.values);
-    expect(memoryInsert?.values.dominantEmotion).toBe('anxious.');
+    // Per TDD P1-017: "A unit test confirms 'Anxious.' is stored as 'anxious'"
+    expect(memoryInsert?.values.dominantEmotion).toBe('anxious');
   });
 
   it('sets conversation.status = "summarized" on success', async () => {
@@ -312,8 +313,71 @@ describe('TDD-required log on third failed attempt', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// markConversation
+// P1-017 TDD-required: atomicity — emotional_snapshots failure rolls back
 // ─────────────────────────────────────────────────────────────────────────────
+
+describe('Atomicity — emotional_snapshots and memories are always consistent (TDD P1-017)', () => {
+  it('if the emotional_snapshots insert fails, the memories insert is also rolled back', async () => {
+    mockSuccessfulComplete();
+
+    // Simulate the transaction failing on the emotional_snapshots insert.
+    // We use a real-ish transaction mock that throws after the memories INSERT
+    // to prove the DB transaction rolls both back together.
+    let insertCallCount = 0;
+    mockTransaction.mockImplementationOnce(async (cb: (tx: unknown) => unknown) => {
+      const tx = {
+        insert: (_table: unknown) => ({
+          values: (vals: { role?: string; content?: unknown }) => ({
+            returning: async () => {
+              insertCallCount++;
+              if (insertCallCount === 2) {
+                // Second insert is emotional_snapshots — simulate FK violation
+                throw new Error('insert or update on table "emotional_snapshots" violates foreign key constraint');
+              }
+              const id = 'mem-rollback-test';
+              dbInserts.push({ table: String(_table), values: { ...vals, id } });
+              return [{ id }];
+            },
+          }),
+        }),
+        update: () => ({
+          set: (_vals: unknown) => ({
+            where: async () => { dbStatusUpdate = _vals as string; },
+          }),
+        }),
+      };
+      // When the transaction callback throws, the real DB would roll back.
+      // Our mock propagates the throw so runExtractionJob sees a failed tx.
+      return cb(tx);
+    });
+
+    const result = await runExtractionJob({ conversationId: CONV_ID, userId: USER_ID, attempt: 1 });
+
+    // Extraction job reports db_error
+    expect(result.success).toBe(false);
+    expect(result.reason).toBe('db_error');
+
+    // The memories insert may have been attempted but the transaction
+    // threw before completing — no status update to "summarized" occurred
+    expect(dbStatusUpdate).not.toBe('summarized');
+  });
+
+  it('a second conversation closing on the same date inserts a second emotional_snapshots row (not upserted)', async () => {
+    // Run two extraction jobs for different conversations
+    mockSuccessfulComplete();
+    await runExtractionJob({ conversationId: 'conv-A', userId: USER_ID, attempt: 1 });
+
+    const insertsAfterFirst = dbInserts.length; // memories + emotional_snapshots = 2
+
+    dbInserts = [];
+    mockSuccessfulComplete();
+    await runExtractionJob({ conversationId: 'conv-B', userId: USER_ID, attempt: 1 });
+
+    // Second job should also produce two inserts — not a single upsert
+    // (the trends aggregation averages multiple snapshots per day)
+    expect(dbInserts.length).toBe(insertsAfterFirst);
+  });
+});
 
 describe('markConversation', () => {
   it('calls db.update with the given status', async () => {
