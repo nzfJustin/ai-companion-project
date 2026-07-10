@@ -225,7 +225,8 @@ export async function runExtractionJob(
           snapshotDate:    today,
           dominantEmotion: result.dominant_emotion,
           emotionScores:   result.emotion_scores,
-        });
+        })
+        .returning();
 
       // Mark conversation as summarized
       await tx
