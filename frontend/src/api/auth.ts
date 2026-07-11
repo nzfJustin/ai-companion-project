@@ -103,3 +103,24 @@ export async function refreshSession(): Promise<void> {
 export function logout(): Promise<void> {
   return apiFetch('/v1/auth/logout', { method: 'POST' });
 }
+
+// ─── Memory PIN verification (F1-009) ─────────────────────────────────────────
+
+export interface VerifyPinResponse {
+  /** Signed RS256 JWT to pass as X-Elevated-Token header on L4/5 memory reads */
+  elevated_token: string;
+}
+
+/**
+ * Verifies the user's memory PIN and returns a short-lived elevated token
+ * (valid for 10 minutes server-side) that unlocks Level 4–5 memory access.
+ *
+ * @throws {ApiError(401, 'WRONG_PIN')}   Wrong PIN entered
+ * @throws {ApiError(429, 'PIN_LOCKED')}  Three consecutive wrong attempts
+ */
+export function verifyMemoryPin(pin: string): Promise<VerifyPinResponse> {
+  return apiFetch<VerifyPinResponse>('/v1/auth/memory-pin/verify', {
+    method: 'POST',
+    body:   { pin },
+  });
+}

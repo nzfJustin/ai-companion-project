@@ -20,8 +20,9 @@ import { LoginScreen }      from './screens/LoginScreen';
 import { RegisterScreen }   from './screens/RegisterScreen';
 import { OnboardingScreen } from './screens/OnboardingScreen';
 import { ChatScreen }       from './screens/ChatScreen';
-import { MemoriesScreen }   from './screens/MemoriesScreen';
-import { PlaceholderScreen } from './screens/PlaceholderScreen';
+import { MemoriesScreen }      from './screens/MemoriesScreen';
+import { MemoryDetailScreen }  from './screens/MemoryDetailScreen';
+import { PlaceholderScreen }   from './screens/PlaceholderScreen';
 
 export const router = createBrowserRouter([
   // ── Public routes ───────────────────────────────────────────────────────────
@@ -42,7 +43,7 @@ export const router = createBrowserRouter([
           { path: '/chat',                 element: <ChatScreen /> },
           { path: '/chat/:conversationId', element: <ChatScreen /> },
           { path: '/memories',             element: <MemoriesScreen /> },
-          { path: '/memories/:id',         element: <PlaceholderScreen name="/memories/:id" /> },
+          { path: '/memories/:id',         element: <MemoryDetailScreen /> },
           { path: '/trends',               element: <PlaceholderScreen name="/trends" /> },
           { path: '/settings',             element: <PlaceholderScreen name="/settings" /> },
         ],
