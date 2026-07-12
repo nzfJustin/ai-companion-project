@@ -28,6 +28,19 @@ extensions['.ts'] = (mod, filename) => {
   mod._compile(outputText, filename);
 };
 
+// ── window.matchMedia stub (jsdom doesn't implement it) ───────────────────────
+Object.defineProperty(window, 'matchMedia', {
+  writable: true,
+  value: (query: string) => ({
+    matches: false,
+    media:   query,
+    onchange: null,
+    addEventListener:    () => {},
+    removeEventListener: () => {},
+    dispatchEvent:       () => false,
+  }),
+});
+
 // RTL's automatic cleanup relies on a global afterEach being registered;
 // since vitest.config.ts uses globals: false, we register it explicitly.
 afterEach(() => {

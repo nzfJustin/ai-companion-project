@@ -15,6 +15,7 @@ import { authRouter }          from './routes/v1/auth.router';
 import { usersRouter }         from './routes/v1/users.router';
 import { conversationsRouter } from './routes/v1/conversations.router';
 import { memoriesRouter }      from './routes/v1/memories.router';
+import { insightsRouter }      from './routes/v1/insights.router';
 import { requestLogger }       from './middleware/requestLogger';
 import { errorHandler }        from './middleware/errorHandler';
 
@@ -63,6 +64,7 @@ app.use('/v1/auth',         authRouter);
 app.use('/v1/users',        usersRouter);
 app.use('/v1/conversations', conversationsRouter);
 app.use('/v1/memories',      memoriesRouter);
+app.use('/v1/insights',      insightsRouter);
 
 // ── Error handler (must be last) ──────────────────────────────────────────────
 app.use(errorHandler);
