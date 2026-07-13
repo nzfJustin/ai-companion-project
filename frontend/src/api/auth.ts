@@ -124,3 +124,34 @@ export function verifyMemoryPin(pin: string): Promise<VerifyPinResponse> {
     body:   { pin },
   });
 }
+
+// ─── User profile update (F1-011) ─────────────────────────────────────────────
+
+export interface PatchMePayload {
+  display_name?: string;
+  timezone?:     string;
+  comm_style?:   'warm' | 'direct' | 'reflective';
+}
+
+export function patchMe(payload: PatchMePayload): Promise<MeResponse> {
+  return apiFetch<MeResponse>('/v1/users/me', {
+    method: 'PATCH',
+    body:   payload,
+  });
+}
+
+// ─── Streak (F1-011) — Phase 3 backend, defaults to 0 if not yet available ────
+
+export interface StreakResponse {
+  current_streak: number;
+  longest_streak: number;
+  last_active_date: string | null;
+}
+
+export async function getStreak(): Promise<StreakResponse> {
+  try {
+    return await apiFetch<StreakResponse>('/v1/users/me/streak');
+  } catch {
+    return { current_streak: 0, longest_streak: 0, last_active_date: null };
+  }
+}

@@ -23,6 +23,7 @@ import { ChatScreen }       from './screens/ChatScreen';
 import { MemoriesScreen }      from './screens/MemoriesScreen';
 import { MemoryDetailScreen }  from './screens/MemoryDetailScreen';
 import { TrendsScreen }        from './screens/TrendsScreen';
+import { SettingsScreen }      from './screens/SettingsScreen';
 import { PlaceholderScreen }   from './screens/PlaceholderScreen';
 
 export const router = createBrowserRouter([
@@ -46,7 +47,7 @@ export const router = createBrowserRouter([
           { path: '/memories',             element: <MemoriesScreen /> },
           { path: '/memories/:id',         element: <MemoryDetailScreen /> },
           { path: '/trends',               element: <TrendsScreen /> },
-          { path: '/settings',             element: <PlaceholderScreen name="/settings" /> },
+          { path: '/settings',             element: <SettingsScreen /> },
         ],
       },
     ],
