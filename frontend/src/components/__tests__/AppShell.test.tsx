@@ -30,7 +30,7 @@ function renderAppShell(initialPath = '/chat') {
           <Route element={<AppShell />}>
             <Route path="/chat"      element={<div>Chat content</div>} />
             <Route path="/memories"  element={<div>Memories content</div>} />
-            <Route path="/trends"    element={<div>Trends content</div>} />
+            <Route path="/insights"  element={<div>Insights content</div>} />
             <Route path="/settings"  element={<div>Settings content</div>} />
           </Route>
           <Route path="/login" element={<div data-testid="login-screen">Login</div>} />
@@ -53,7 +53,7 @@ describe('AppShell — navigation', () => {
     // Both sidebar and bottom nav render the same labels — getAllByRole
     expect(screen.getAllByRole('link', { name: /chat/i }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole('link', { name: /memories/i }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole('link', { name: /trends/i }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('link', { name: /insights/i }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole('link', { name: /settings/i }).length).toBeGreaterThan(0);
   });
 
@@ -65,8 +65,8 @@ describe('AppShell — navigation', () => {
     const memoriesLinks = screen.getAllByRole('link', { name: /memories/i });
     expect(memoriesLinks[0]).toHaveAttribute('href', '/memories');
 
-    const trendsLinks = screen.getAllByRole('link', { name: /trends/i });
-    expect(trendsLinks[0]).toHaveAttribute('href', '/trends');
+    const insightsLinks = screen.getAllByRole('link', { name: /insights/i });
+    expect(insightsLinks[0]).toHaveAttribute('href', '/insights');
 
     const settingsLinks = screen.getAllByRole('link', { name: /settings/i });
     expect(settingsLinks[0]).toHaveAttribute('href', '/settings');
