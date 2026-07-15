@@ -20,11 +20,11 @@ import { LoginScreen }      from './screens/LoginScreen';
 import { RegisterScreen }   from './screens/RegisterScreen';
 import { OnboardingScreen } from './screens/OnboardingScreen';
 import { ChatScreen }       from './screens/ChatScreen';
-import { MemoriesScreen }      from './screens/MemoriesScreen';
+import { MemoriesScreen }     from './screens/MemoriesScreen';
 import { MemoryDetailScreen }  from './screens/MemoryDetailScreen';
-import { TrendsScreen }        from './screens/TrendsScreen';
+import { InsightsScreen }      from './screens/InsightsScreen';
 import { SettingsScreen }      from './screens/SettingsScreen';
-import { PlaceholderScreen }   from './screens/PlaceholderScreen';
+import { PlaceholderScreen } from './screens/PlaceholderScreen';
 
 export const router = createBrowserRouter([
   // ── Public routes ───────────────────────────────────────────────────────────
@@ -46,7 +46,10 @@ export const router = createBrowserRouter([
           { path: '/chat/:conversationId', element: <ChatScreen /> },
           { path: '/memories',             element: <MemoriesScreen /> },
           { path: '/memories/:id',         element: <MemoryDetailScreen /> },
-          { path: '/trends',               element: <TrendsScreen /> },
+          // /trends redirects to /insights for backward compatibility
+          { path: '/trends',               element: <Navigate to="/insights" replace /> },
+          { path: '/insights',             element: <InsightsScreen /> },
+          { path: '/insights/:id',         element: <PlaceholderScreen name="/insights/:id" /> },
           { path: '/settings',             element: <SettingsScreen /> },
         ],
       },

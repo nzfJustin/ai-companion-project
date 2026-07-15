@@ -272,7 +272,7 @@ describe('TrendsScreen — weekly summary card', () => {
     vi.mocked(getTrends).mockResolvedValue(patchedTrend);
     renderTrends();
 
-    expect(await screen.findByText('calm')).toBeInTheDocument();
+    expect((await screen.findAllByText('calm')).length).toBeGreaterThan(0);
     expect(screen.getByText(/most common feeling this week was/i)).toBeInTheDocument();
   });
 

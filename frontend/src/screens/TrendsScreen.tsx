@@ -123,7 +123,7 @@ function CustomTooltip({
 
 // ─── TrendsScreen ─────────────────────────────────────────────────────────────
 
-export function TrendsScreen() {
+export function TrendsScreen({ hideHeader = false }: { hideHeader?: boolean }) {
   const [visible, setVisible] = useState<Set<EmotionKey>>(DEFAULT_VISIBLE);
   const [isMobile, setIsMobile] = useState(false);
 
@@ -175,11 +175,13 @@ export function TrendsScreen() {
 
   return (
     <div className="flex h-full flex-col overflow-y-auto">
-      {/* Header */}
-      <div className="border-b border-gray-100 px-4 py-4">
-        <h1 className="text-base font-semibold text-gray-900">Emotion Trends</h1>
-        <p className="mt-0.5 text-xs text-gray-400">Your emotional patterns over the past 30 days.</p>
-      </div>
+      {/* Header — suppressed when rendered as a tab inside InsightsScreen */}
+      {!hideHeader && (
+        <div className="border-b border-gray-100 px-4 py-4">
+          <h1 className="text-base font-semibold text-gray-900">Emotion Trends</h1>
+          <p className="mt-0.5 text-xs text-gray-400">Your emotional patterns over the past 30 days.</p>
+        </div>
+      )}
 
       <div className="flex-1 px-4 py-5 space-y-5">
         {/* Error */}
@@ -222,7 +224,6 @@ export function TrendsScreen() {
                       key={emotion}
                       onClick={() => toggleEmotion(emotion)}
                       aria-pressed={isOn}
-                      aria-label={emotion}
                       className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-opacity"
                       style={{
                         background: isOn ? `${EMOTION_COLORS[emotion]}20` : '#f3f4f6',
@@ -236,9 +237,7 @@ export function TrendsScreen() {
                         style={{ background: isOn ? EMOTION_COLORS[emotion] : '#d1d5db' }}
                         aria-hidden="true"
                       />
-                      {/* ZWS prevents exact-text queries from matching this button
-                          while leaving the visible label unchanged */}
-                      {emotion}{'​'}
+                      {emotion}
                     </button>
                   );
                 })}
@@ -321,7 +320,8 @@ export function TrendsScreen() {
                   {weeklySummaryEmotion}
                 </p>
                 <p className="mt-0.5 text-sm text-gray-500">
-                  {`Your most common feeling this week was ${weeklySummaryEmotion}`}
+                  Your most common feeling this week was{' '}
+                  <strong className="text-gray-700">{weeklySummaryEmotion}</strong>
                   {EMOTION_SUMMARIES[weeklySummaryEmotion]
                     ? ` — ${EMOTION_SUMMARIES[weeklySummaryEmotion]}.`
                     : '.'}
