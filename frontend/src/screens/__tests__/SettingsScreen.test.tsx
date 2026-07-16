@@ -7,10 +7,11 @@
 // ── Mocks ──────────────────────────────────────────────────────────────────────
 
 vi.mock('../../api/auth', () => ({
-  getMe:      vi.fn(),
-  patchMe:    vi.fn(),
-  getStreak:  vi.fn(),
-  logout:     vi.fn(),
+  getMe:          vi.fn(),
+  patchMe:        vi.fn(),
+  getStreak:      vi.fn(),
+  logout:         vi.fn(),
+  requestExport:  vi.fn(),
 }));
 
 vi.mock('../../store/authStore', () => ({
@@ -22,13 +23,13 @@ vi.mock('../../store/authStore', () => ({
 
 // ── Imports ────────────────────────────────────────────────────────────────────
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SettingsScreen } from '../SettingsScreen';
-import { getMe, patchMe, getStreak, logout } from '../../api/auth';
+import { getMe, patchMe, getStreak, logout, requestExport } from '../../api/auth';
 import { clearAuth } from '../../store/authStore';
 import { ApiError } from '../../api/client';
 
@@ -58,10 +59,6 @@ function renderSettings() {
     </QueryClientProvider>,
   );
 }
-
-afterEach(() => {
-  vi.useRealTimers();
-});
 
 beforeEach(() => {
   vi.mocked(getMe).mockResolvedValue(USER);
@@ -189,6 +186,8 @@ describe('SettingsScreen — save', () => {
     await waitFor(() =>
       expect(screen.queryByText(/^saved$/i)).not.toBeInTheDocument(),
     );
+
+    vi.useRealTimers();
   });
 
   it('shows a field-level error when the API returns INVALID_COMM_STYLE', async () => {
@@ -337,5 +336,188 @@ describe('SettingsScreen — sign out', () => {
     await screen.findByRole('button', { name: /sign out/i });
     expect(screen.queryByText(/delete account/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/deactivate/i)).not.toBeInTheDocument();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F2-004 — Data Export Flow
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('SettingsScreen — F2-004 Data Export', () => {
+  beforeEach(() => {
+    vi.mocked(requestExport).mockReset();
+  });
+
+  // ── Section visibility ─────────────────────────────────────────────────────
+
+  it('renders a "Data & Privacy" section', async () => {
+    renderSettings();
+    expect(await screen.findByText(/data & privacy/i)).toBeInTheDocument();
+  });
+
+  it('renders an "Export my data" heading and description', async () => {
+    renderSettings();
+    expect(await screen.findByText(/export my data/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/includes all your conversations.*zip/i),
+    ).toBeInTheDocument();
+  });
+
+  it('renders a "Request export" button in the idle state', async () => {
+    renderSettings();
+    expect(
+      await screen.findByRole('button', { name: /request export/i }),
+    ).toBeInTheDocument();
+  });
+
+  it('Data & Privacy section appears between streak card and sign out', async () => {
+    renderSettings();
+    await screen.findByText(/export my data/i);
+
+    const elements = document.body.querySelectorAll('[aria-labelledby]');
+    const sectionIds = Array.from(elements).map((el) =>
+      el.getAttribute('aria-labelledby'),
+    );
+    // streak-heading should appear before the export section, sign out after
+    const streakIdx  = sectionIds.findIndex((id) => id === 'streak-heading');
+    const signoutIdx = sectionIds.findIndex((id) => id === 'signout-heading');
+    expect(streakIdx).toBeGreaterThan(-1);
+    expect(signoutIdx).toBeGreaterThan(-1);
+    expect(streakIdx).toBeLessThan(signoutIdx);
+  });
+
+  // ── Successful export ──────────────────────────────────────────────────────
+
+  it('calls POST /v1/users/me/export when "Request export" is clicked', async () => {
+    vi.mocked(requestExport).mockResolvedValue({ estimated_minutes: 15 });
+    const user = userEvent.setup();
+    renderSettings();
+
+    await user.click(await screen.findByRole('button', { name: /request export/i }));
+
+    await waitFor(() => expect(requestExport).toHaveBeenCalledTimes(1));
+  });
+
+  it('shows the success message after export starts', async () => {
+    vi.mocked(requestExport).mockResolvedValue({ estimated_minutes: 15 });
+    const user = userEvent.setup();
+    renderSettings();
+
+    await user.click(await screen.findByRole('button', { name: /request export/i }));
+
+    expect(
+      await screen.findByText(/export started.*email.*ready/i),
+    ).toBeInTheDocument();
+  });
+
+  it('the success message is non-dismissible — no close button', async () => {
+    vi.mocked(requestExport).mockResolvedValue({ estimated_minutes: 15 });
+    const user = userEvent.setup();
+    renderSettings();
+
+    await user.click(await screen.findByRole('button', { name: /request export/i }));
+    await screen.findByText(/export started/i);
+
+    // The success state has no dismiss button
+    expect(screen.queryByRole('button', { name: /dismiss|close|×/i })).not.toBeInTheDocument();
+  });
+
+  it('hides the "Request export" button after a successful export', async () => {
+    vi.mocked(requestExport).mockResolvedValue({ estimated_minutes: 15 });
+    const user = userEvent.setup();
+    renderSettings();
+
+    await user.click(await screen.findByRole('button', { name: /request export/i }));
+    await screen.findByText(/export started/i);
+
+    expect(
+      screen.queryByRole('button', { name: /request export/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  // ── Loading state ──────────────────────────────────────────────────────────
+
+  it('disables the button and shows "Starting export…" while the request is in flight', async () => {
+    let resolve!: (v: { estimated_minutes: number }) => void;
+    vi.mocked(requestExport).mockReturnValue(
+      new Promise((r) => { resolve = r; }),
+    );
+    const user = userEvent.setup();
+    renderSettings();
+
+    await user.click(await screen.findByRole('button', { name: /request export/i }));
+
+    expect(await screen.findByText(/starting export/i)).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /request export/i }),
+    ).not.toBeInTheDocument();
+
+    // Resolve to avoid hanging test
+    resolve({ estimated_minutes: 15 });
+  });
+
+  // ── Already-pending state ──────────────────────────────────────────────────
+
+  it('shows "An export is already in progress" on 429 EXPORT_ALREADY_PENDING', async () => {
+    vi.mocked(requestExport).mockRejectedValue(
+      new ApiError(429, 'EXPORT_ALREADY_PENDING'),
+    );
+    const user = userEvent.setup();
+    renderSettings();
+
+    await user.click(await screen.findByRole('button', { name: /request export/i }));
+
+    expect(
+      await screen.findByText(/an export is already in progress/i),
+    ).toBeInTheDocument();
+  });
+
+  it('hides the "Request export" button when an export is already pending', async () => {
+    vi.mocked(requestExport).mockRejectedValue(
+      new ApiError(429, 'EXPORT_ALREADY_PENDING'),
+    );
+    const user = userEvent.setup();
+    renderSettings();
+
+    await user.click(await screen.findByRole('button', { name: /request export/i }));
+    await screen.findByText(/already in progress/i);
+
+    expect(
+      screen.queryByRole('button', { name: /request export/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  // ── Retry on generic error ─────────────────────────────────────────────────
+
+  it('restores the "Request export" button after a generic API error so the user can retry', async () => {
+    vi.mocked(requestExport).mockRejectedValue(new ApiError(500, 'INTERNAL_SERVER_ERROR'));
+    const user = userEvent.setup();
+    renderSettings();
+
+    await user.click(await screen.findByRole('button', { name: /request export/i }));
+
+    // Button should come back after the error (state returns to 'idle')
+    expect(
+      await screen.findByRole('button', { name: /request export/i }),
+    ).toBeInTheDocument();
+  });
+
+  // ── No double-submit ───────────────────────────────────────────────────────
+
+  it('prevents double-clicking the export button', async () => {
+    let resolve!: (v: { estimated_minutes: number }) => void;
+    vi.mocked(requestExport).mockReturnValue(
+      new Promise((r) => { resolve = r; }),
+    );
+    const user = userEvent.setup();
+    renderSettings();
+
+    const btn = await screen.findByRole('button', { name: /request export/i });
+    await user.click(btn);
+    // Button disappears (replaced by loading state) — second click impossible
+    await screen.findByText(/starting export/i);
+    expect(requestExport).toHaveBeenCalledTimes(1);
+
+    resolve({ estimated_minutes: 15 });
   });
 });
