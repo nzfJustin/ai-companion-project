@@ -12,6 +12,7 @@ vi.mock('../../api/auth', () => ({
   getStreak:      vi.fn(),
   logout:         vi.fn(),
   requestExport:  vi.fn(),
+  deleteAccount:  vi.fn(),
 }));
 
 vi.mock('../../store/authStore', () => ({
@@ -29,7 +30,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SettingsScreen } from '../SettingsScreen';
-import { getMe, patchMe, getStreak, logout, requestExport } from '../../api/auth';
+import { getMe, patchMe, getStreak, logout, requestExport, deleteAccount } from '../../api/auth';
 import { clearAuth } from '../../store/authStore';
 import { ApiError } from '../../api/client';
 
@@ -330,13 +331,6 @@ describe('SettingsScreen — sign out', () => {
     await waitFor(() => expect(clearAuth).toHaveBeenCalledTimes(1));
     expect(await screen.findByTestId('login')).toBeInTheDocument();
   });
-
-  it('does NOT show account deletion UI', async () => {
-    renderSettings();
-    await screen.findByRole('button', { name: /sign out/i });
-    expect(screen.queryByText(/delete account/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/deactivate/i)).not.toBeInTheDocument();
-  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -519,5 +513,220 @@ describe('SettingsScreen — F2-004 Data Export', () => {
     expect(requestExport).toHaveBeenCalledTimes(1);
 
     resolve({ estimated_minutes: 15 });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F2-005 — Account Deletion Flow
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('SettingsScreen — F2-005 Account Deletion', () => {
+  beforeEach(() => {
+    vi.mocked(deleteAccount).mockReset();
+  });
+
+  // ── Delete link ─────────────────────────────────────────────────────────────
+
+  it('shows a "Delete account" link at the bottom of Settings', async () => {
+    renderSettings();
+    expect(
+      await screen.findByRole('button', { name: /delete account/i }),
+    ).toBeInTheDocument();
+  });
+
+  it('"Delete account" is styled as a low-prominence link, not a button', async () => {
+    renderSettings();
+    const btn = await screen.findByRole('button', { name: /delete account/i });
+    // Confirm it uses underline styling (low-prominence)
+    expect(btn.className).toMatch(/underline/);
+    // Should NOT have primary button styles
+    expect(btn.className).not.toMatch(/bg-slate-700|bg-red-600/);
+  });
+
+  it('"Delete account" appears below the sign out button', async () => {
+    renderSettings();
+    await screen.findByRole('button', { name: /sign out/i });
+    const allButtons = screen.getAllByRole('button');
+    const signOutIdx = allButtons.findIndex((b) => /sign out/i.test(b.textContent ?? ''));
+    const deleteIdx  = allButtons.findIndex((b) => /delete account/i.test(b.textContent ?? ''));
+    expect(signOutIdx).toBeGreaterThan(-1);
+    expect(deleteIdx).toBeGreaterThan(-1);
+    expect(deleteIdx).toBeGreaterThan(signOutIdx);
+  });
+
+  // ── Modal opens ─────────────────────────────────────────────────────────────
+
+  it('opens the deletion confirmation modal when "Delete account" is clicked', async () => {
+    const user = userEvent.setup();
+    renderSettings();
+
+    await user.click(await screen.findByRole('button', { name: /delete account/i }));
+
+    expect(
+      screen.getByRole('dialog', { name: /delete your account/i }),
+    ).toBeInTheDocument();
+  });
+
+  it('shows the warning text in the modal', async () => {
+    const user = userEvent.setup();
+    renderSettings();
+
+    await user.click(await screen.findByRole('button', { name: /delete account/i }));
+
+    // "This cannot be undone." is in a nested <strong>, so the warning
+    // paragraph's text is split across elements — match on the <p>'s full
+    // textContent instead of relying on a single text node.
+    expect(
+      screen.getByText((_, el) =>
+        el?.tagName.toLowerCase() === 'p' &&
+        /permanently delete all your conversations.*cannot be undone/is.test(el.textContent ?? ''),
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('shows a text input for the DELETE confirmation word', async () => {
+    const user = userEvent.setup();
+    renderSettings();
+
+    await user.click(await screen.findByRole('button', { name: /delete account/i }));
+
+    expect(
+      screen.getByRole('textbox', { name: /type delete to confirm/i }),
+    ).toBeInTheDocument();
+  });
+
+  // ── Confirm gate ─────────────────────────────────────────────────────────────
+
+  it('confirm button is disabled until the user types DELETE exactly', async () => {
+    const user = userEvent.setup();
+    renderSettings();
+
+    await user.click(await screen.findByRole('button', { name: /delete account/i }));
+    const confirmBtn = screen.getByRole('button', { name: /permanently delete/i });
+
+    expect(confirmBtn).toBeDisabled();
+  });
+
+  it('confirm button enables after typing DELETE (case-sensitive)', async () => {
+    const user = userEvent.setup();
+    renderSettings();
+
+    await user.click(await screen.findByRole('button', { name: /delete account/i }));
+    await user.type(screen.getByRole('textbox', { name: /type delete/i }), 'DELETE');
+
+    expect(
+      screen.getByRole('button', { name: /permanently delete/i }),
+    ).not.toBeDisabled();
+  });
+
+  it('confirm button stays disabled if the user types "delete" (lowercase)', async () => {
+    const user = userEvent.setup();
+    renderSettings();
+
+    await user.click(await screen.findByRole('button', { name: /delete account/i }));
+    await user.type(screen.getByRole('textbox', { name: /type delete/i }), 'delete');
+
+    expect(
+      screen.getByRole('button', { name: /permanently delete/i }),
+    ).toBeDisabled();
+  });
+
+  // ── Cancel ────────────────────────────────────────────────────────────────────
+
+  it('closing the modal via Cancel returns to Settings without calling deleteAccount', async () => {
+    const user = userEvent.setup();
+    renderSettings();
+
+    await user.click(await screen.findByRole('button', { name: /delete account/i }));
+    await user.click(screen.getByRole('button', { name: /cancel account deletion/i }));
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(deleteAccount).not.toHaveBeenCalled();
+  });
+
+  it('"Keep my account" button in the modal also cancels', async () => {
+    const user = userEvent.setup();
+    renderSettings();
+
+    await user.click(await screen.findByRole('button', { name: /delete account/i }));
+    await user.click(screen.getByRole('button', { name: /keep my account/i }));
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  // ── Successful deletion ────────────────────────────────────────────────────
+
+  it('calls DELETE /v1/users/me when the user confirms', async () => {
+    vi.mocked(deleteAccount).mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    renderSettings();
+
+    await user.click(await screen.findByRole('button', { name: /delete account/i }));
+    await user.type(screen.getByRole('textbox', { name: /type delete/i }), 'DELETE');
+    await user.click(screen.getByRole('button', { name: /permanently delete/i }));
+
+    await waitFor(() => expect(deleteAccount).toHaveBeenCalledTimes(1));
+  });
+
+  it('clears auth and navigates to /login?deleted=1 after successful deletion', async () => {
+    vi.mocked(deleteAccount).mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    renderSettings();
+
+    await user.click(await screen.findByRole('button', { name: /delete account/i }));
+    await user.type(screen.getByRole('textbox', { name: /type delete/i }), 'DELETE');
+    await user.click(screen.getByRole('button', { name: /permanently delete/i }));
+
+    await waitFor(() => expect(clearAuth).toHaveBeenCalledTimes(1));
+    expect(await screen.findByTestId('login')).toBeInTheDocument();
+  });
+
+  // ── Error state ────────────────────────────────────────────────────────────
+
+  it('shows an inline error when deleteAccount API call fails', async () => {
+    vi.mocked(deleteAccount).mockRejectedValue(new Error('Network error'));
+    const user = userEvent.setup();
+    renderSettings();
+
+    await user.click(await screen.findByRole('button', { name: /delete account/i }));
+    await user.type(screen.getByRole('textbox', { name: /type delete/i }), 'DELETE');
+    await user.click(screen.getByRole('button', { name: /permanently delete/i }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/something went wrong/i);
+  });
+
+  it('the confirm button re-enables after an error so the user can retry', async () => {
+    vi.mocked(deleteAccount).mockRejectedValue(new Error('Network error'));
+    const user = userEvent.setup();
+    renderSettings();
+
+    await user.click(await screen.findByRole('button', { name: /delete account/i }));
+    const input = screen.getByRole('textbox', { name: /type delete/i });
+    await user.type(input, 'DELETE');
+    await user.click(screen.getByRole('button', { name: /permanently delete/i }));
+
+    await screen.findByRole('alert');
+    // Still in the modal, confirm button back to enabled (input still says DELETE)
+    expect(
+      screen.getByRole('button', { name: /permanently delete/i }),
+    ).not.toBeDisabled();
+  });
+
+  it('clearing the input after an error re-disables the confirm button', async () => {
+    vi.mocked(deleteAccount).mockRejectedValue(new Error('Network error'));
+    const user = userEvent.setup();
+    renderSettings();
+
+    await user.click(await screen.findByRole('button', { name: /delete account/i }));
+    const input = screen.getByRole('textbox', { name: /type delete/i });
+    await user.type(input, 'DELETE');
+    await user.click(screen.getByRole('button', { name: /permanently delete/i }));
+
+    await screen.findByRole('alert');
+    await user.clear(input);
+
+    expect(
+      screen.getByRole('button', { name: /permanently delete/i }),
+    ).toBeDisabled();
   });
 });

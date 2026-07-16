@@ -24,7 +24,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getMe, patchMe, getStreak, logout, requestExport } from '../api/auth';
+import { getMe, patchMe, getStreak, logout, requestExport, deleteAccount } from '../api/auth';
 import { ApiError } from '../api/client';
 import { clearAuth } from '../store/authStore';
 
@@ -128,6 +128,161 @@ function StreakCard({ streak }: { streak: number }) {
 
 // ─── SettingsScreen ───────────────────────────────────────────────────────────
 
+// ─── DeleteAccountModal (F2-005) ──────────────────────────────────────────────
+//
+// Full-screen overlay (fixed, inset-0) that sits on top of the Settings screen.
+// The user must type the word DELETE exactly (case-sensitive) before the
+// confirm button enables — a deliberate friction gate for an irreversible action.
+
+const CONFIRM_WORD = 'DELETE';
+
+interface DeleteAccountModalProps {
+  onCancel: () => void;
+}
+
+function DeleteAccountModal({ onCancel }: DeleteAccountModalProps) {
+  const navigate    = useNavigate();
+  const [text,       setText]      = useState('');
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [error,      setError]      = useState<string | null>(null);
+
+  const canConfirm = text === CONFIRM_WORD && !isDeleting;
+
+  async function handleConfirm() {
+    if (!canConfirm) return;
+    setIsDeleting(true);
+    setError(null);
+    try {
+      await deleteAccount();
+      clearAuth();
+      // Navigate with replace so the user can't go "back" to a deleted session
+      navigate('/login?deleted=1', { replace: true });
+    } catch {
+      setError('Something went wrong. Please try again.');
+      setIsDeleting(false);
+    }
+  }
+
+  return (
+    /* Full-screen white overlay — no outside-click dismiss, same pattern
+       as the memory PIN gate so users can't accidentally dismiss it */
+    <div
+      className="fixed inset-0 z-50 flex flex-col bg-white"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="delete-dialog-title"
+    >
+      {/* Header */}
+      <div className="flex items-center border-b border-gray-100 px-4 py-3">
+        <button
+          onClick={onCancel}
+          disabled={isDeleting}
+          className="text-sm text-gray-500 hover:text-gray-800 disabled:opacity-40"
+          aria-label="Cancel account deletion"
+        >
+          ← Cancel
+        </button>
+      </div>
+
+      {/* Body */}
+      <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
+        {/* Warning icon */}
+        <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-red-50">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={1.5}
+            className="h-7 w-7 text-red-500"
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"
+            />
+          </svg>
+        </div>
+
+        <h2
+          id="delete-dialog-title"
+          className="mb-2 text-lg font-semibold text-gray-900"
+        >
+          Delete your account?
+        </h2>
+
+        <p className="mb-6 max-w-xs text-sm leading-relaxed text-gray-500">
+          This will permanently delete all your conversations, memories, and
+          insights. <strong className="text-gray-700">This cannot be undone.</strong>
+        </p>
+
+        {/* Confirmation input */}
+        <div className="w-full max-w-xs">
+          <p className="mb-2 text-xs text-gray-400">
+            Type <span className="font-mono font-semibold text-gray-700">DELETE</span> to confirm
+          </p>
+          <input
+            type="text"
+            value={text}
+            onChange={(e) => {
+              setText(e.target.value);
+              setError(null);
+            }}
+            onKeyDown={(e) => { if (e.key === 'Enter' && canConfirm) void handleConfirm(); }}
+            placeholder="DELETE"
+            aria-label="Type DELETE to confirm"
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="none"
+            spellCheck={false}
+            disabled={isDeleting}
+            className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-center font-mono text-sm tracking-widest focus:border-red-300 focus:bg-white focus:outline-none disabled:opacity-50"
+          />
+
+          {error && (
+            <p role="alert" className="mt-2 text-xs text-red-600">
+              {error}
+            </p>
+          )}
+
+          {/* Confirm button */}
+          <button
+            onClick={() => void handleConfirm()}
+            disabled={!canConfirm}
+            className="
+              mt-4 w-full rounded-xl bg-red-600 py-3 text-sm font-semibold
+              text-white transition-opacity hover:bg-red-700
+              disabled:cursor-not-allowed disabled:opacity-40
+            "
+          >
+            {isDeleting ? (
+              <span className="inline-flex items-center gap-2">
+                <span
+                  className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white"
+                  aria-hidden="true"
+                />
+                Deleting…
+              </span>
+            ) : (
+              'Permanently delete account'
+            )}
+          </button>
+
+          <button
+            onClick={onCancel}
+            disabled={isDeleting}
+            className="mt-3 w-full py-2.5 text-sm text-gray-400 hover:text-gray-600 disabled:opacity-40"
+          >
+            Keep my account
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── SettingsScreen ────────────────────────────────────────────────────────────
+
 export function SettingsScreen() {
   const navigate     = useNavigate();
   const queryClient  = useQueryClient();
@@ -161,6 +316,9 @@ export function SettingsScreen() {
   // 'pending' → already-in-progress message
   type ExportState = 'idle' | 'loading' | 'started' | 'pending';
   const [exportState, setExportState] = useState<ExportState>('idle');
+
+  // ── Delete modal (F2-005) ─────────────────────────────────────────────────
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
 
   // Populate form once user data arrives
   useEffect(() => {
@@ -488,7 +646,22 @@ export function SettingsScreen() {
             Sign out
           </button>
         </section>
+
+        {/* ── Delete account (F2-005) ── */}
+        <div className="pb-2 text-center">
+          <button
+            onClick={() => setShowDeleteModal(true)}
+            className="text-xs text-gray-400 underline transition-colors hover:text-red-500"
+          >
+            Delete account
+          </button>
+        </div>
       </div>
+
+      {/* Delete confirmation modal (F2-005) */}
+      {showDeleteModal && (
+        <DeleteAccountModal onCancel={() => setShowDeleteModal(false)} />
+      )}
     </div>
   );
 }

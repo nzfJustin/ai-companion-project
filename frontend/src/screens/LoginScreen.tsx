@@ -14,7 +14,7 @@
 
 import { useState } from 'react';
 import type { FormEvent } from 'react';
-import { useNavigate, useLocation, Link } from 'react-router-dom';
+import { useNavigate, useLocation, Link, useSearchParams } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
 import { AuthLayout } from '../components/AuthLayout';
 import { TextField } from '../components/TextField';
@@ -36,7 +36,11 @@ interface LocationState {
 export function LoginScreen() {
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
   const locationState = (location.state as LocationState | null) ?? null;
+
+  /** True when navigated here after successful account deletion (F2-005) */
+  const accountDeleted = searchParams.get('deleted') === '1';
 
   const setAccessToken = useAuthStore((s) => s.setAccessToken);
 
@@ -85,6 +89,16 @@ export function LoginScreen() {
 
   return (
     <AuthLayout title="Welcome back">
+      {/* Account deleted banner (F2-005) */}
+      {accountDeleted && (
+        <div
+          role="status"
+          className="mb-4 rounded-md bg-gray-50 px-3 py-2.5 text-sm text-gray-600"
+        >
+          Your account has been deleted.
+        </div>
+      )}
+
       {locationState?.justRegistered && (
         <p className="mb-4 rounded-md bg-green-50 px-3 py-2 text-sm text-green-700">
           Account created — sign in to continue.
