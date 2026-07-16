@@ -46,6 +46,13 @@ export interface ListMemoriesParams {
   levels?:  string;
   from?:    string;  // YYYY-MM-DD
   to?:      string;  // YYYY-MM-DD
+  /**
+   * Semantic search query (F2-003). When present, the backend performs
+   * pgvector cosine similarity search instead of returning memories in
+   * created_at DESC order. Mutually exclusive with levels/from/to — the
+   * caller should omit those when q is set.
+   */
+  q?:       string;
 }
 
 // ─── Endpoints ────────────────────────────────────────────────────────────────
@@ -58,6 +65,7 @@ export function listMemories(params: ListMemoriesParams = {}): Promise<MemoryLis
   const query = new URLSearchParams();
   if (params.page)    query.set('page',     String(params.page));
   if (params.perPage) query.set('per_page', String(params.perPage));
+  if (params.q)       query.set('q',        params.q);
   if (params.levels)  query.set('level',    params.levels);
   if (params.from)    query.set('from',     params.from);
   if (params.to)      query.set('to',       params.to);

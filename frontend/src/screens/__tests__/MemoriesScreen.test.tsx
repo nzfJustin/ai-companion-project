@@ -396,3 +396,223 @@ describe('MemoriesScreen — load more', () => {
     });
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F2-003 — Semantic Memory Search tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('MemoriesScreen — F2-003 semantic search', () => {
+  beforeEach(() => {
+    vi.mocked(listMemories).mockResolvedValue(RESP_EMPTY);
+  });
+
+  // ── Search input always visible ──────────────────────────────────────────
+
+  it('renders the search input above the filter bar', async () => {
+    renderScreen();
+    expect(await screen.findByRole('searchbox', { name: /search memories/i })).toBeInTheDocument();
+  });
+
+  it('shows the search input even when memories list is empty', async () => {
+    renderScreen();
+    await screen.findByText(/no memories yet/i);
+    expect(screen.getByRole('searchbox', { name: /search memories/i })).toBeInTheDocument();
+  });
+
+  // ── Submit behaviour ─────────────────────────────────────────────────────
+
+  it('pressing Enter with text in the search input adds ?q= to the URL', async () => {
+    const user = userEvent.setup();
+    renderScreen();
+
+    const input = await screen.findByRole('searchbox', { name: /search memories/i });
+    await user.type(input, 'work anxiety');
+    await user.keyboard('{Enter}');
+
+    await waitFor(() =>
+      expect(vi.mocked(listMemories)).toHaveBeenCalledWith(
+        expect.objectContaining({ q: 'work anxiety' }),
+      ),
+    );
+  });
+
+  it('calls listMemories with the q param when search is submitted', async () => {
+    vi.mocked(listMemories).mockResolvedValue(RESP_SINGLE);
+    const user = userEvent.setup();
+    renderScreen();
+
+    const input = await screen.findByRole('searchbox', { name: /search memories/i });
+    await user.type(input, 'peaceful');
+    await user.keyboard('{Enter}');
+
+    await waitFor(() =>
+      expect(vi.mocked(listMemories)).toHaveBeenLastCalledWith(
+        expect.objectContaining({ q: 'peaceful' }),
+      ),
+    );
+  });
+
+  it('does NOT submit when the input is empty', async () => {
+    const user = userEvent.setup();
+    renderScreen();
+
+    await screen.findByRole('searchbox');
+    const callsBefore = vi.mocked(listMemories).mock.calls.length;
+
+    await user.keyboard('{Enter}');
+
+    // Should not have added another call
+    expect(vi.mocked(listMemories).mock.calls.length).toBe(callsBefore);
+  });
+
+  // ── Initialise from URL ?q= ───────────────────────────────────────────────
+
+  it('populates the input from the URL ?q= param on mount', async () => {
+    renderScreen('?q=hello%20world');
+    const input = await screen.findByRole('searchbox', { name: /search memories/i });
+    expect((input as HTMLInputElement).value).toBe('hello world');
+  });
+
+  it('fetches with the q param from the URL on mount', async () => {
+    vi.mocked(listMemories).mockResolvedValue(RESP_SINGLE);
+    renderScreen('?q=calm+afternoon');
+    await waitFor(() =>
+      expect(vi.mocked(listMemories)).toHaveBeenCalledWith(
+        expect.objectContaining({ q: 'calm afternoon' }),
+      ),
+    );
+  });
+
+  // ── Filter bar hidden in search mode ─────────────────────────────────────
+
+  it('hides the level chips while a search query is active', async () => {
+    renderScreen('?q=hello');
+    await screen.findByRole('searchbox');
+    expect(screen.queryByRole('button', { name: /^L1$/i })).not.toBeInTheDocument();
+  });
+
+  it('hides the date range pickers while a search query is active', async () => {
+    renderScreen('?q=hello');
+    await screen.findByRole('searchbox');
+    expect(screen.queryByLabelText(/filter from date/i)).not.toBeInTheDocument();
+  });
+
+  it('shows the filter bar when no search is active', async () => {
+    renderScreen();
+    expect(await screen.findByRole('button', { name: /^L1$/i })).toBeInTheDocument();
+    expect(screen.getByLabelText(/filter from date/i)).toBeInTheDocument();
+  });
+
+  // ── Active search indicator ───────────────────────────────────────────────
+
+  it('shows "Results for..." indicator when search is active', async () => {
+    renderScreen('?q=work+stress');
+    expect(await screen.findByText(/results for/i)).toBeInTheDocument();
+    // The quoted query also appears in the empty-state message below, so
+    // there are two matches by design — assert at least one is present.
+    expect(screen.getAllByText(/"work stress"/).length).toBeGreaterThan(0);
+  });
+
+  it('shows a "Clear search" link in the active search indicator', async () => {
+    renderScreen('?q=anxiety');
+    // Two elements match /clear search/i by design: the × icon button in the
+    // input (aria-label only, no visible text) and the text link in the
+    // indicator — find the one with visible "Clear search" text.
+    const buttons = await screen.findAllByRole('button', { name: /clear search/i });
+    expect(buttons.some((b) => b.textContent === 'Clear search')).toBe(true);
+  });
+
+  // ── Clear search ──────────────────────────────────────────────────────────
+
+  it('clicking the × button clears both the input and the search query', async () => {
+    vi.mocked(listMemories).mockResolvedValue(RESP_EMPTY);
+    const user = userEvent.setup();
+    renderScreen('?q=hello');
+
+    await screen.findByRole('searchbox');
+    // The × icon button renders before the text link in DOM order.
+    const [clearIconButton] = screen.getAllByRole('button', { name: /clear search/i });
+    await user.click(clearIconButton);
+
+    await waitFor(() =>
+      expect(screen.queryByText(/results for/i)).not.toBeInTheDocument(),
+    );
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
+  });
+
+  it('clearing search restores the previous filter state (level chips visible again)', async () => {
+    const user = userEvent.setup();
+    renderScreen('?level=1,2&q=hello');
+
+    await screen.findByRole('searchbox');
+    const [clearButton] = screen.getAllByRole('button', { name: /clear search/i });
+    await user.click(clearButton);
+
+    // Level chips should reappear
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /^L1$/i })).toBeInTheDocument(),
+    );
+    // Level filter should still be active (2 of 5 selected)
+    expect(screen.getByRole('button', { name: /^L1$/i })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: /^L3$/i })).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('pressing Escape in the search input clears the search', async () => {
+    const user = userEvent.setup();
+    renderScreen('?q=test');
+
+    const input = await screen.findByRole('searchbox');
+    await user.type(input, '{Escape}');
+
+    await waitFor(() =>
+      expect(screen.queryByText(/results for/i)).not.toBeInTheDocument(),
+    );
+  });
+
+  // ── No Load more in search mode ───────────────────────────────────────────
+
+  it('does not show Load more when in search mode even if has_more is true', async () => {
+    vi.mocked(listMemories).mockResolvedValue(RESP_PAGE1); // has_more: true
+    renderScreen('?q=calm');
+
+    await screen.findByText('A quiet afternoon'); // wait for results
+    expect(screen.queryByRole('button', { name: /load more/i })).not.toBeInTheDocument();
+  });
+
+  // ── Search empty state ────────────────────────────────────────────────────
+
+  it('shows the search query in the empty state message', async () => {
+    vi.mocked(listMemories).mockResolvedValue(RESP_EMPTY);
+    renderScreen('?q=something+obscure');
+
+    expect(await screen.findByText(/"something obscure"/i)).toBeInTheDocument();
+    expect(screen.getByText(/try different words/i)).toBeInTheDocument();
+  });
+
+  it('shows a "Clear search" button in the search empty state', async () => {
+    vi.mocked(listMemories).mockResolvedValue(RESP_EMPTY);
+    renderScreen('?q=xyz123');
+
+    await screen.findByText(/"xyz123"/i);
+    const clearBtns = screen.getAllByRole('button', { name: /clear search/i });
+    expect(clearBtns.length).toBeGreaterThanOrEqual(1);
+  });
+
+  // ── Search does not pass level/date params ────────────────────────────────
+
+  it('does not send level or date params when in search mode', async () => {
+    vi.mocked(listMemories).mockResolvedValue(RESP_EMPTY);
+    renderScreen('?level=1,2&from=2026-01-01&q=hello');
+
+    await waitFor(() => {
+      const call = vi.mocked(listMemories).mock.calls.find(
+        ([p]) => p.q === 'hello',
+      );
+      expect(call).toBeDefined();
+      const params = call![0];
+      expect(params.levels).toBeUndefined();
+      expect(params.from).toBeUndefined();
+      expect(params.to).toBeUndefined();
+    });
+  });
+});
