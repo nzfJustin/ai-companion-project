@@ -183,3 +183,18 @@ export interface ExportResponse {
 export function requestExport(): Promise<ExportResponse> {
   return apiFetch<ExportResponse>('/v1/users/me/export', { method: 'POST' });
 }
+
+// ─── Account deletion (F2-005) ─────────────────────────────────────────────────
+
+/**
+ * DELETE /v1/users/me
+ * Initiates soft-deletion of the authenticated user's account. The backend
+ * anonymises the email, sets deleted_at, and schedules a hard-delete job
+ * that purges all associated data. This is irreversible from the client's
+ * perspective — there is no recovery flow.
+ *
+ * Returns 200 on success.
+ */
+export function deleteAccount(): Promise<void> {
+  return apiFetch('/v1/users/me', { method: 'DELETE' });
+}

@@ -183,3 +183,53 @@ describe('LoginScreen', () => {
     );
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F2-005 — Account Deleted Banner
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('LoginScreen — F2-005 account deleted banner', () => {
+  it('shows "Your account has been deleted" when ?deleted=1 is in the URL', async () => {
+    // Render with the query param that deleteAccount navigation sets
+    const { QueryClient, QueryClientProvider } = await import('@tanstack/react-query');
+    const { MemoryRouter, Routes, Route } = await import('react-router-dom');
+    const { render: rtlRender, screen: rtlScreen } = await import('@testing-library/react');
+    const { LoginScreen } = await import('../LoginScreen');
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    rtlRender(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={['/login?deleted=1']}>
+          <Routes>
+            <Route path="/login" element={<LoginScreen />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(
+      await rtlScreen.findByText(/your account has been deleted/i),
+    ).toBeInTheDocument();
+  });
+
+  it('does NOT show the deleted banner without the ?deleted=1 param', async () => {
+    const { QueryClient, QueryClientProvider } = await import('@tanstack/react-query');
+    const { MemoryRouter, Routes, Route } = await import('react-router-dom');
+    const { render: rtlRender, screen: rtlScreen } = await import('@testing-library/react');
+    const { LoginScreen } = await import('../LoginScreen');
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    rtlRender(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={['/login']}>
+          <Routes>
+            <Route path="/login" element={<LoginScreen />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    // Wait for render, then assert banner is absent
+    expect(rtlScreen.queryByText(/your account has been deleted/i)).not.toBeInTheDocument();
+  });
+});
