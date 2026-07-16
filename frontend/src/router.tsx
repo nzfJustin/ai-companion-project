@@ -23,6 +23,7 @@ import { ChatScreen }       from './screens/ChatScreen';
 import { MemoriesScreen }     from './screens/MemoriesScreen';
 import { MemoryDetailScreen }  from './screens/MemoryDetailScreen';
 import { InsightsScreen }      from './screens/InsightsScreen';
+import { InsightReportScreen } from './screens/InsightReportScreen';
 import { SettingsScreen }      from './screens/SettingsScreen';
 import { PlaceholderScreen } from './screens/PlaceholderScreen';
 
@@ -49,7 +50,7 @@ export const router = createBrowserRouter([
           // /trends redirects to /insights for backward compatibility
           { path: '/trends',               element: <Navigate to="/insights" replace /> },
           { path: '/insights',             element: <InsightsScreen /> },
-          { path: '/insights/:id',         element: <PlaceholderScreen name="/insights/:id" /> },
+          { path: '/insights/:id',         element: <InsightReportScreen /> },
           { path: '/settings',             element: <SettingsScreen /> },
         ],
       },
