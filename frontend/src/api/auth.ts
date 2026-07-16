@@ -133,6 +133,10 @@ export interface PatchMePayload {
   comm_style?:   'warm' | 'direct' | 'reflective';
 }
 
+/**
+ * PATCH /v1/users/me — updates any subset of the editable profile fields.
+ * Returns the full updated user object.
+ */
 export function patchMe(payload: PatchMePayload): Promise<MeResponse> {
   return apiFetch<MeResponse>('/v1/users/me', {
     method: 'PATCH',
@@ -148,10 +152,34 @@ export interface StreakResponse {
   last_active_date: string | null;
 }
 
+/**
+ * GET /v1/users/me/streak — returns the user's current conversation streak.
+ * This endpoint is built in Phase 3; this wrapper returns a zero-streak
+ * object on any error so the Settings screen degrades gracefully.
+ */
 export async function getStreak(): Promise<StreakResponse> {
   try {
     return await apiFetch<StreakResponse>('/v1/users/me/streak');
   } catch {
     return { current_streak: 0, longest_streak: 0, last_active_date: null };
   }
+}
+
+// ─── Data export (F2-004) ──────────────────────────────────────────────────────
+
+export interface ExportResponse {
+  /** Estimated processing time in minutes */
+  estimated_minutes: number;
+}
+
+/**
+ * POST /v1/users/me/export
+ * Triggers an asynchronous data export job. The export is delivered via email
+ * when complete — there is no polling mechanism in Phase 2.
+ *
+ * Returns 202 Accepted on success.
+ * Throws ApiError(429, 'EXPORT_ALREADY_PENDING') if a job is already queued.
+ */
+export function requestExport(): Promise<ExportResponse> {
+  return apiFetch<ExportResponse>('/v1/users/me/export', { method: 'POST' });
 }

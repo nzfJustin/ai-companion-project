@@ -2,25 +2,29 @@
  * src/screens/SettingsScreen.tsx
  *
  * F1-011 · Profile & Settings Screen
+ * F2-004 · Data Export (enhancement — Data & Privacy section)
  *
- * Acceptance criteria:
+ * Acceptance criteria (F1-011):
  *   ✓ Editable fields pre-populated from GET /v1/users/me:
  *       display name (text), timezone (searchable IANA datalist),
  *       communication style (three-card selector with descriptions)
  *   ✓ PATCH /v1/users/me on save; inline "Saved ✓" fades after 2 s;
  *     API errors map to field-level messages
- *   ✓ Persistent info callout on comm style: "This changes how your AI
- *     companion speaks with you. You can update it any time."
- *   ✓ Streak stat card (read-only) — flame + number + "day streak";
- *     0-streak variant reads "Start your streak — chat today"; taps to /chat
+ *   ✓ Persistent info callout on comm style
+ *   ✓ Streak stat card (read-only), taps to /chat
  *   ✓ Sign out — POST /v1/auth/logout, clears Zustand, redirects /login
- *   ✗ No account deletion UI in Phase 1
+ *
+ * Acceptance criteria (F2-004):
+ *   ✓ "Data & Privacy" section between streak card and sign out
+ *   ✓ "Request export" → POST /v1/users/me/export (202 Accepted)
+ *   ✓ Success: non-dismissible "Export started" message for the session
+ *   ✓ 429 EXPORT_ALREADY_PENDING → "An export is already in progress"
  */
 
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getMe, patchMe, getStreak, logout } from '../api/auth';
+import { getMe, patchMe, getStreak, logout, requestExport } from '../api/auth';
 import { ApiError } from '../api/client';
 import { clearAuth } from '../store/authStore';
 
@@ -150,6 +154,14 @@ export function SettingsScreen() {
   const [savedVisible, setSavedVisible] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
 
+  // ── Export state (F2-004) ─────────────────────────────────────────────────
+  // 'idle'    → show button
+  // 'loading' → button disabled + spinner
+  // 'started' → success message (persists for session, non-dismissible)
+  // 'pending' → already-in-progress message
+  type ExportState = 'idle' | 'loading' | 'started' | 'pending';
+  const [exportState, setExportState] = useState<ExportState>('idle');
+
   // Populate form once user data arrives
   useEffect(() => {
     if (user) {
@@ -194,6 +206,23 @@ export function SettingsScreen() {
       }
     },
   });
+
+  // ── Export (F2-004) ───────────────────────────────────────────────────────
+  const handleExport = useCallback(async () => {
+    if (exportState !== 'idle') return;
+    setExportState('loading');
+    try {
+      await requestExport();
+      setExportState('started');
+    } catch (err) {
+      if (err instanceof ApiError && err.code === 'EXPORT_ALREADY_PENDING') {
+        setExportState('pending');
+      } else {
+        // Other errors: reset to idle so the user can retry
+        setExportState('idle');
+      }
+    }
+  }, [exportState]);
 
   // ── Sign out ──────────────────────────────────────────────────────────────
   const handleSignOut = useCallback(async () => {
@@ -349,6 +378,95 @@ export function SettingsScreen() {
         <section aria-labelledby="streak-heading">
           <SectionLabel>Your streak</SectionLabel>
           <StreakCard streak={streakData?.current_streak ?? 0} />
+        </section>
+
+        {/* ── Data & Privacy (F2-004) ──────────────────────────────────── */}
+        <section aria-labelledby="privacy-heading">
+          <SectionLabel>Data &amp; Privacy</SectionLabel>
+
+          <div className="rounded-xl border border-gray-100 bg-white p-4">
+            <p className="text-sm font-medium text-gray-900">Export my data</p>
+            <p className="mt-0.5 text-xs leading-relaxed text-gray-400">
+              Includes all your conversations, memories, and emotional trends
+              in a downloadable ZIP.
+            </p>
+
+            <div className="mt-3">
+              {/* Idle — show the export button */}
+              {exportState === 'idle' && (
+                <button
+                  onClick={() => void handleExport()}
+                  className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+                >
+                  Request export
+                </button>
+              )}
+
+              {/* Loading — spinner */}
+              {exportState === 'loading' && (
+                <button
+                  disabled
+                  className="flex items-center gap-2 rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-500 opacity-60"
+                >
+                  <span
+                    className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-gray-300 border-t-gray-600"
+                    aria-hidden="true"
+                  />
+                  Starting export…
+                </button>
+              )}
+
+              {/* Started — success, non-dismissible, persists for session */}
+              {exportState === 'started' && (
+                <div
+                  className="flex items-start gap-2 rounded-lg bg-emerald-50 px-3 py-2.5"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <svg
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                    className="mt-0.5 h-4 w-4 shrink-0 text-emerald-500"
+                    aria-hidden="true"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                  <p className="text-xs leading-relaxed text-emerald-700">
+                    Export started — you'll receive an email when it's ready.
+                  </p>
+                </div>
+              )}
+
+              {/* Pending — already in progress */}
+              {exportState === 'pending' && (
+                <div
+                  className="flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2.5"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <svg
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                    className="mt-0.5 h-4 w-4 shrink-0 text-amber-500"
+                    aria-hidden="true"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                  <p className="text-xs leading-relaxed text-amber-700">
+                    An export is already in progress.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
         </section>
 
         {/* ── Sign out ──────────────────────────────────────────────────── */}
