@@ -2,3 +2,4 @@ node_modules/
 dist/
 .env
 *.local
+generated_secrets.txt
