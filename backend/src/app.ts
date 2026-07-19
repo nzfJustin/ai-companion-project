@@ -28,29 +28,42 @@ app.use(requestLogger);
 app.use(helmet());
 
 /**
- * CORS_ORIGIN must be an explicit origin (not "*") because every frontend
- * request is sent with credentials: 'include' (it needs the httpOnly
- * refresh_token cookie). Browsers reject Access-Control-Allow-Origin: "*"
- * combined with credentialed requests, so the default `cors()` config
- * — which uses the wildcard — silently blocks every request from the
- * frontend before it reaches any route handler.
+ * CORS — reads from CORS_ALLOWED_ORIGINS (comma-separated list of allowed
+ * origins). Every frontend request is credentialed (refresh_token cookie),
+ * so Access-Control-Allow-Origin must name the exact origin, never "*".
  *
- * Set CORS_ORIGIN in .env to your frontend's dev/staging/prod URL, e.g.
- * CORS_ORIGIN=http://localhost:5173
+ * Allowed headers include X-Elevated-Token (memory PIN step-up, F1-009)
+ * and Last-Event-ID (SSE reconnect, F1-006).
+ *
+ * Production example:
+ *   CORS_ALLOWED_ORIGINS=https://your-app.pages.dev,https://your-app.com
  */
-const corsOrigin = process.env.CORS_ORIGIN;
-if (!corsOrigin) {
-  // eslint-disable-next-line no-console
-  console.warn(
-    'CORS_ORIGIN is not set — falling back to http://localhost:5173. ' +
-    'Set CORS_ORIGIN in .env for staging/production.',
-  );
-}
+const ALLOWED_ORIGINS: string[] = (
+  process.env.CORS_ALLOWED_ORIGINS ?? 'http://localhost:5173'
+)
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
 
 app.use(
   cors({
-    origin: corsOrigin ?? 'http://localhost:5173',
+    origin: (origin, callback) => {
+      // Allow non-browser requests (curl, Postman, health checks)
+      if (!origin) return callback(null, true);
+      if (ALLOWED_ORIGINS.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error(`CORS: origin ${origin} is not allowed`));
+      }
+    },
     credentials: true,
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-Elevated-Token',   // memory PIN step-up (F1-009)
+      'Last-Event-ID',      // SSE reconnect (F1-006)
+      'X-Admin-Key',        // internal quality endpoints (T-013)
+    ],
   }),
 );
 
