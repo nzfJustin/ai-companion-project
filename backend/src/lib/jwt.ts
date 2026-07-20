@@ -68,11 +68,24 @@ export interface AccessTokenPayload {
 // ─── Key helpers ──────────────────────────────────────────────────────────────
 
 /**
- * PEM keys stored in env vars usually have literal `\n` instead of real
- * newlines.  This normalises both forms so either works.
+ * Decodes a PEM key from an env var.
+ * Accepts three formats so Railway/Doppler/local all work without friction:
+ *   1. Base64-encoded PEM  (preferred for Railway — no newline issues)
+ *   2. Literal \n escape sequences  (e.g. "-----BEGIN...\\nMIIE...")
+ *   3. Raw PEM with real newlines
  */
 function normaliseKey(raw: string): string {
-  return raw.replace(/\\n/g, '\n');
+  const trimmed = raw.trim();
+  // Format 1: base64 — detected by absence of "-----"
+  if (!trimmed.startsWith('-----')) {
+    return Buffer.from(trimmed, 'base64').toString('utf8');
+  }
+  // Format 2: literal \n sequences
+  if (trimmed.includes('\\n')) {
+    return trimmed.replace(/\\n/g, '\n');
+  }
+  // Format 3: already has real newlines
+  return trimmed;
 }
 
 export function getJwtPrivateKey(): string {
