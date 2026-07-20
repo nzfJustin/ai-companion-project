@@ -3,3 +3,4 @@ dist/
 .env
 *.local
 generated_secrets.txt
+verify.sh
