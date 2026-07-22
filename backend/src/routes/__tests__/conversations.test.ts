@@ -213,7 +213,17 @@ function setupUpdateMock(returnConv: typeof CLOSED_CONV) {
   const where     = jest.fn().mockReturnValue({ returning });
   const set       = jest.fn().mockReturnValue({ where });
   mockUpdate.mockReturnValue({ set } as never);
-  return { set, where, returning };
+
+  // T-006: the PATCH close now wraps both updates in a transaction.
+  // Make db.transaction call the callback with a tx object that behaves
+  // like db (so both the conversations update and the userContext
+  // session_count increment work without extra mocking).
+  const tx = { update: jest.fn().mockReturnValue({ set } as never) };
+  (db.transaction as jest.Mock).mockImplementation(
+    async (cb: (txArg: typeof tx) => Promise<unknown>) => cb(tx),
+  );
+
+  return { set, where, returning, tx };
 }
 
 describe('PATCH /v1/conversations/:id', () => {
@@ -326,6 +336,70 @@ describe('PATCH /v1/conversations/:id', () => {
       .send({ status: 'active' });
 
     expect(mockUpdate).not.toHaveBeenCalled();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// T-006 — session_count increment on explicit PATCH close
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('PATCH /v1/conversations/:id — T-006 session_count increment', () => {
+  it('calls db.transaction (not a bare update) so session_count is atomic', async () => {
+    mockConvFindFirst.mockResolvedValue(ACTIVE_CONV as never);
+    setupUpdateMock(CLOSED_CONV);
+
+    await request(app)
+      .patch(`/v1/conversations/${ACTIVE_CONV.id}`)
+      .set('Authorization', authHeader)
+      .send({ status: 'closed' });
+
+    expect(db.transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('performs two updates inside the transaction (conversations + userContext)', async () => {
+    mockConvFindFirst.mockResolvedValue(ACTIVE_CONV as never);
+    const { tx } = setupUpdateMock(CLOSED_CONV);
+
+    await request(app)
+      .patch(`/v1/conversations/${ACTIVE_CONV.id}`)
+      .set('Authorization', authHeader)
+      .send({ status: 'closed' });
+
+    // tx.update should be called twice:
+    // 1. conversations — set status + endedAt
+    // 2. userContext  — set sessionCount = sessionCount + 1
+    expect(tx.update).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns 200 even after the session_count update path (regression)', async () => {
+    mockConvFindFirst.mockResolvedValue(ACTIVE_CONV as never);
+    setupUpdateMock(CLOSED_CONV);
+
+    const res = await request(app)
+      .patch(`/v1/conversations/${ACTIVE_CONV.id}`)
+      .set('Authorization', authHeader)
+      .send({ status: 'closed' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('closed');
+  });
+
+  it('does not increment session_count if the conversation update is rolled back', async () => {
+    mockConvFindFirst.mockResolvedValue(ACTIVE_CONV as never);
+
+    // Simulate transaction throwing (e.g. DB error on close)
+    (db.transaction as jest.Mock).mockRejectedValueOnce(
+      new Error('DB constraint violation'),
+    );
+
+    const res = await request(app)
+      .patch(`/v1/conversations/${ACTIVE_CONV.id}`)
+      .set('Authorization', authHeader)
+      .send({ status: 'closed' });
+
+    // The handler should return 500 and session_count should NOT have changed
+    // (transaction never committed)
+    expect(res.status).toBe(500);
   });
 });
 

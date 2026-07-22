@@ -46,10 +46,14 @@ function setupUpdateMock(returnId: string | null = 'conv-1') {
   const returning = jest.fn().mockResolvedValue(
     returnId ? [{ id: returnId }] : [],  // empty = race-condition skip
   );
-  const where     = jest.fn().mockReturnValue({ returning });
+  // T-006: the session_count increment chains .catch() directly off
+  // .where() (no .returning()), so the default mock needs it too —
+  // every existing test flows through the same db.update mock.
+  const catchFn   = jest.fn().mockResolvedValue(undefined);
+  const where     = jest.fn().mockReturnValue({ returning, catch: catchFn });
   const set       = jest.fn().mockReturnValue({ where });
   mockUpdate.mockReturnValue({ set });
-  return { set, where, returning };
+  return { set, where, returning, catch: catchFn };
 }
 
 beforeEach(() => {
@@ -126,7 +130,8 @@ describe('runInactivityClose — closing stale conversations', () => {
 
     await runInactivityClose(boss);
 
-    expect(mockUpdate).toHaveBeenCalledTimes(1);
+    // T-006: one call to close the conversation, one to increment session_count.
+    expect(mockUpdate).toHaveBeenCalledTimes(2);
     expect(set).toHaveBeenCalledWith(
       expect.objectContaining({ status: 'closed', endedAt: expect.any(Date) }),
     );
@@ -141,7 +146,8 @@ describe('runInactivityClose — closing stale conversations', () => {
 
     await runInactivityClose(boss);
 
-    expect(mockUpdate).toHaveBeenCalledTimes(1);
+    // T-006: one call to close the conversation, one to increment session_count.
+    expect(mockUpdate).toHaveBeenCalledTimes(2);
   });
 
   it('enqueues a memory extraction job after closing each conversation', async () => {
@@ -174,13 +180,15 @@ describe('runInactivityClose — closing stale conversations', () => {
     let callNum = 0;
     const ids = ['conv-a', 'conv-b', 'conv-c'];
     const returning = jest.fn().mockImplementation(async () => [{ id: ids[callNum++] }]);
-    const where = jest.fn().mockReturnValue({ returning });
+    const catchFn = jest.fn().mockResolvedValue(undefined);
+    const where = jest.fn().mockReturnValue({ returning, catch: catchFn });
     const set   = jest.fn().mockReturnValue({ where });
     mockUpdate.mockReturnValue({ set });
 
     await runInactivityClose(boss);
 
-    expect(mockUpdate).toHaveBeenCalledTimes(3);
+    // T-006: each conversation gets two update calls (close + session_count).
+    expect(mockUpdate).toHaveBeenCalledTimes(6);
     expect(mockEnqueue).toHaveBeenCalledTimes(3);
   });
 
@@ -194,7 +202,8 @@ describe('runInactivityClose — closing stale conversations', () => {
     const boss    = makeFakeBoss();
     let callNum   = 0;
     const returning = jest.fn().mockImplementation(async () => [{ id: ['conv-x', 'conv-y'][callNum++] }]);
-    const where = jest.fn().mockReturnValue({ returning });
+    const catchFn = jest.fn().mockResolvedValue(undefined);
+    const where = jest.fn().mockReturnValue({ returning, catch: catchFn });
     mockUpdate.mockReturnValue({ set: jest.fn().mockReturnValue({ where }) });
 
     const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
@@ -221,7 +230,8 @@ describe('runInactivityClose — closing stale conversations', () => {
     const boss    = makeFakeBoss();
     let callNum   = 0;
     const returning = jest.fn().mockImplementation(async () => [{ id: ['conv-1', 'conv-2'][callNum++] }]);
-    const where = jest.fn().mockReturnValue({ returning });
+    const catchFn = jest.fn().mockResolvedValue(undefined);
+    const where = jest.fn().mockReturnValue({ returning, catch: catchFn });
     mockUpdate.mockReturnValue({ set: jest.fn().mockReturnValue({ where }) });
 
     const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
@@ -295,6 +305,7 @@ describe('runInactivityClose — error handling', () => {
             if (callCount === 1) throw new Error('DB error on first conversation');
             return [{ id: 'conv-ok' }];
           }),
+          catch: jest.fn().mockResolvedValue(undefined),
         }),
       }),
     }));
@@ -341,5 +352,80 @@ describe('runInactivityClose — error handling', () => {
     // (which will mark the job as failed for retry). This is intentional —
     // the cron job should retry naturally on the next 5-minute tick.
     await expect(runInactivityClose(boss)).rejects.toThrow('DB connection lost');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// T-006 — session_count increment (inactivity auto-close path)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('runInactivityClose — T-006 session_count increment', () => {
+  it('increments user_context.session_count for each conversation closed', async () => {
+    mockExecute.mockResolvedValue({
+      rows: [{ id: 'conv-1', user_id: 'user-1' }],
+    });
+    const boss = makeFakeBoss();
+
+    // Track all update calls — first is the conversation close, second is the
+    // session_count increment
+    const updateCalls: Array<{ table: string; values: unknown }> = [];
+    mockUpdate.mockImplementation((table: unknown) => ({
+      set: (vals: unknown) => {
+        updateCalls.push({ table: String(table), values: vals });
+        return {
+          where: jest.fn().mockReturnValue({
+            returning: jest.fn().mockResolvedValue([{ id: 'conv-1' }]),
+          }),
+        };
+      },
+    }));
+
+    await runInactivityClose(boss);
+
+    // Should have two update calls: one for conversations, one for userContext
+    expect(updateCalls.length).toBe(2);
+  });
+
+  it('continues closing other conversations if session_count increment fails', async () => {
+    mockExecute.mockResolvedValue({
+      rows: [
+        { id: 'conv-a', user_id: 'user-1' },
+        { id: 'conv-b', user_id: 'user-2' },
+      ],
+    });
+    const boss = makeFakeBoss();
+
+    let callCount = 0;
+    mockUpdate.mockImplementation(() => ({
+      set: (vals: Record<string, unknown>) => {
+        callCount++;
+        // Fail the session_count increment for the first conversation
+        const isSessionCountIncrement = vals.sessionCount !== undefined ||
+          JSON.stringify(vals).includes('session_count');
+        if (callCount === 2 && isSessionCountIncrement) {
+          return {
+            where: jest.fn().mockReturnValue({
+              returning: jest.fn().mockRejectedValue(new Error('increment failed')),
+              catch: jest.fn().mockResolvedValue(undefined),
+            }),
+          };
+        }
+        return {
+          where: jest.fn().mockReturnValue({
+            returning: jest.fn().mockResolvedValue([{ id: `conv-${callCount}` }]),
+            catch: jest.fn().mockResolvedValue(undefined),
+          }),
+        };
+      },
+    }));
+
+    // Must not throw — second conversation should still be processed
+    await expect(runInactivityClose(boss)).resolves.not.toThrow();
+
+    // Extraction still enqueued for the second conversation
+    expect(mockEnqueue).toHaveBeenCalledWith(boss, {
+      conversation_id: 'conv-b',
+      user_id:         'user-2',
+    });
   });
 });

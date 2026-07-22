@@ -285,11 +285,24 @@ conversationsRouter.patch(
       if (conv.userId !== req.userId) return next(new AppError(403, 'FORBIDDEN'));
       if (conv.status !== 'active')  return next(new AppError(403, 'CONVERSATION_NOT_ACTIVE'));
 
-      const [updated] = await db
-        .update(conversations)
-        .set({ status: 'closed', endedAt: new Date() })
-        .where(eq(conversations.id, id))
-        .returning();
+      // Close the conversation and increment session_count in one transaction
+      // so they are always consistent — if the close fails, the count stays put.
+      const updated = await db.transaction(async (tx) => {
+        const [closed] = await tx
+          .update(conversations)
+          .set({ status: 'closed', endedAt: new Date() })
+          .where(eq(conversations.id, id))
+          .returning();
+
+        // Increment session_count — used by Phase 2 personalization refresh (P2-005)
+        // to know when to re-evaluate the user's communication style.
+        await tx
+          .update(userContext)
+          .set({ sessionCount: sql`${userContext.sessionCount} + 1` })
+          .where(eq(userContext.userId, req.userId!));
+
+        return closed;
+      });
 
       if (_jobQueue) {
         void enqueueExtractionJob(_jobQueue, { conversation_id: id, user_id: req.userId! });
