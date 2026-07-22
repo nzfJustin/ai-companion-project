@@ -14,7 +14,7 @@
 import type { PgBoss, Job } from 'pg-boss';
 import { sql, eq, and } from 'drizzle-orm';
 import { db }                   from '../db';
-import { conversations }        from '../db/schema';
+import { conversations, userContext } from '../db/schema';
 import { runExtractionJob, markConversation } from './extractionJob';
 import { log, warn, logError }  from '../lib/logger';
 
@@ -122,6 +122,21 @@ export async function runInactivityClose(boss: PgBoss): Promise<void> {
         log({ event: 'inactivity_close_skipped', conversation_id: conversationId });
         continue;
       }
+
+      // Increment session_count — same as explicit PATCH close (T-006).
+      // Kept outside the UPDATE above to avoid coupling the race-guard
+      // returning() clause; a failed increment here is non-fatal and logged.
+      await db
+        .update(userContext)
+        .set({ sessionCount: sql`${userContext.sessionCount} + 1` })
+        .where(eq(userContext.userId, userId))
+        .catch((err: unknown) => {
+          logError({
+            event:           'inactivity_close_session_count_error',
+            conversation_id: conversationId,
+            error:           err instanceof Error ? err.message : String(err),
+          });
+        });
 
       await enqueue(boss, {
         conversation_id: conversationId,
