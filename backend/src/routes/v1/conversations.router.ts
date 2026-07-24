@@ -48,6 +48,7 @@ import type { Message }      from '../../ai/llm/types';
 import { warn }              from '../../lib/logger';
 import { enqueueExtractionJob } from '../../jobs';
 import type { PgBoss } from 'pg-boss';
+import { stripCrisisSentinel, sentinelPrefixOverlapLength } from './messagesStream';
 
 // ─── Router + global middleware ────────────────────────────────────────────────
 
@@ -504,7 +505,8 @@ conversationsRouter.post('/:id/messages', aiRateLimit, async (req, res, next) =>
 
   // ── 7. Stream AI response ──────────────────────────────────────────────────
   let firstTokenReceived = false;
-  let accumulated        = '';
+  let accumulated        = '';   // raw, full LLM output — may end with the crisis sentinel (T-007)
+  let pendingBuffer       = '';   // held-back tail that could be an in-progress sentinel match
   const timeoutHandle    = setTimeout(() => {
     if (!firstTokenReceived) {
       writeSseEvent(res, 'error', { code: 'LLM_TIMEOUT' });
@@ -540,15 +542,43 @@ conversationsRouter.post('/:id/messages', aiRateLimit, async (req, res, next) =>
         clearTimeout(timeoutHandle);
       }
 
-      writeSseEvent(res, 'token', { delta: token }, tokenIndex);
-      streamState.tokens.push(token);
-      accumulated += token;
+      accumulated   += token;
+      pendingBuffer += token;
+
+      // T-007: only forward the portion of the buffer that can't possibly
+      // be the start of the crisis sentinel — the rest is held back until
+      // we know whether it's actually building toward one. For ordinary
+      // (non-crisis) responses this never withholds more than a few
+      // characters, so streaming stays effectively real-time.
+      const overlap = sentinelPrefixOverlapLength(pendingBuffer);
+      const safeLen = pendingBuffer.length - overlap;
+      if (safeLen > 0) {
+        const safe = pendingBuffer.slice(0, safeLen);
+        pendingBuffer = pendingBuffer.slice(safeLen);
+
+        writeSseEvent(res, 'token', { delta: safe }, tokenIndex);
+        streamState.tokens.push(safe);
+        tokenIndex++;
+      }
+    }
+
+    // Flush whatever remains in the buffer, with any trailing sentinel stripped.
+    const { text: cleanBuffer, detected: crisisInBuffer } = stripCrisisSentinel(pendingBuffer);
+    if (cleanBuffer) {
+      writeSseEvent(res, 'token', { delta: cleanBuffer }, tokenIndex);
+      streamState.tokens.push(cleanBuffer);
       tokenIndex++;
+    }
+
+    const { text: cleanAccumulated, detected: crisisDetected } = stripCrisisSentinel(accumulated);
+
+    if (crisisDetected || crisisInBuffer) {
+      warn({ event: 'crisis_flag', conversation_id: convId, user_id: userId });
     }
 
     // ── 8. Save assistant message + increment message_count (atomic) ─────────
     const emotion = detectEmotion(content);
-    const aiEnc   = enc.encrypt(accumulated);
+    const aiEnc   = enc.encrypt(cleanAccumulated);
 
     const [assistantMsg] = await db.transaction(async (tx) => {
       const [msg] = await tx
@@ -571,8 +601,8 @@ conversationsRouter.post('/:id/messages', aiRateLimit, async (req, res, next) =>
       return [msg];
     });
 
-    // Append assistant message to context cache
-    appendToContextCache(convId, { role: 'assistant', content: accumulated });
+    // Append assistant message (sentinel stripped) to context cache
+    appendToContextCache(convId, { role: 'assistant', content: cleanAccumulated });
 
     // ── 9. Send event:done ───────────────────────────────────────────────────
     writeSseEvent(res, 'done', {

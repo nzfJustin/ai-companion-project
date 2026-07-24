@@ -111,8 +111,8 @@ describe('sanitizeForPrompt', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('CHAT_PROMPT', () => {
-  it('has version string "chat_v1.0.0"', () => {
-    expect(CHAT_PROMPT.version).toBe('chat_v1.0.0');
+  it('has version string "chat_v1.1.0"', () => {
+    expect(CHAT_PROMPT.version).toBe('chat_v1.1.0');
   });
 
   it('returns a non-empty string', () => {
@@ -237,7 +237,7 @@ describe('ONBOARDING_PROMPT', () => {
 describe('selectPrompt', () => {
   it('returns CHAT_PROMPT when onboarding_done = true', () => {
     const prompt = selectPrompt({ ...BASE_CTX, onboarding_done: true });
-    expect(prompt.version).toBe('chat_v1.0.0');
+    expect(prompt.version).toBe('chat_v1.1.0');
   });
 
   it('returns ONBOARDING_PROMPT when onboarding_done = false', () => {

@@ -53,6 +53,7 @@ import { signAccessToken }      from '../../lib/jwt';
 import { setOrchestrator }      from '../v1/conversations.router';
 import type { AIOrchestrationService } from '../../ai/AIOrchestrationService';
 import { LLMTimeoutError, LLMStreamError } from '../../ai/llm/errors';
+import { CRISIS_SENTINEL }      from '../v1/messagesStream';
 
 // ── Auth setup ─────────────────────────────────────────────────────────────────
 
@@ -466,5 +467,110 @@ describe('emotion detection from user message', () => {
     const done   = frames.find((f) => f.event === 'done');
     const doneData = done?.data as { emotion_tags: { primary: string } };
     expect(doneData?.emotion_tags?.primary).toBe(expectedEmotion);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// T-007 — Crisis sentinel end-to-end
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// messagesStream.test.ts covers stripCrisisSentinel/sentinelPrefixOverlapLength
+// as pure unit tests. These verify the sentinel is actually kept out of the
+// client stream and the persisted message when driven through the real
+// POST /:id/messages handler — not just the helper functions in isolation.
+
+describe('POST /:id/messages — T-007 crisis sentinel', () => {
+  beforeEach(() => {
+    mockDbFindFirst.mockResolvedValue(ACTIVE_CONV);
+    mockEncrypt.mockReturnValue({ ciphertext: Buffer.from('enc'), iv: Buffer.alloc(12) });
+    setupTransactionMock();
+  });
+
+  it('never sends the sentinel in a token frame, even when it arrives as its own token', async () => {
+    makeStreamOrchestrator([
+      "I hear how much pain you're in. Please call 988.\n",
+      CRISIS_SENTINEL,
+    ]);
+
+    const res = await collectSSE(`/v1/conversations/${CONV_ID}/messages`, { content: 'I want to hurt myself' });
+    const frames = parseSSEFrames(res.body as string);
+    const tokens = frames.filter((f) => f.event === 'token');
+
+    for (const t of tokens) {
+      expect((t.data as { delta: string }).delta).not.toContain(CRISIS_SENTINEL);
+    }
+    const joined = tokens.map((t) => (t.data as { delta: string }).delta).join('');
+    expect(joined).not.toContain(CRISIS_SENTINEL);
+    expect(joined).toContain('988');
+  });
+
+  it('never sends the sentinel even when it arrives split across multiple small tokens', async () => {
+    // Split the sentinel into arbitrary chunks to exercise the withheld-buffer path.
+    const chunks = [CRISIS_SENTINEL.slice(0, 6), CRISIS_SENTINEL.slice(6, 14), CRISIS_SENTINEL.slice(14)];
+    makeStreamOrchestrator(['Please call 988.\n', ...chunks]);
+
+    const res = await collectSSE(`/v1/conversations/${CONV_ID}/messages`, { content: 'help' });
+    const frames = parseSSEFrames(res.body as string);
+    const joined = frames
+      .filter((f) => f.event === 'token')
+      .map((t) => (t.data as { delta: string }).delta)
+      .join('');
+
+    expect(joined).not.toContain(CRISIS_SENTINEL);
+    expect(joined).toContain('988');
+  });
+
+  it('persists the assistant message without the sentinel', async () => {
+    makeStreamOrchestrator(['Please call 988.\n', CRISIS_SENTINEL]);
+
+    await collectSSE(`/v1/conversations/${CONV_ID}/messages`, { content: 'help' });
+
+    // encrypt() is called once for the user message, once for the assistant
+    // message — the second call is the one that must be sentinel-free.
+    const assistantEncryptCall = mockEncrypt.mock.calls[1][0] as string;
+    expect(assistantEncryptCall).not.toContain(CRISIS_SENTINEL);
+    expect(assistantEncryptCall).toBe('Please call 988.');
+  });
+
+  it('logs a crisis_flag warning when the sentinel is detected', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    makeStreamOrchestrator(['Please call 988.\n', CRISIS_SENTINEL]);
+
+    await collectSSE(`/v1/conversations/${CONV_ID}/messages`, { content: 'help' });
+
+    const logged = warnSpy.mock.calls.map((c) => JSON.parse(c[0] as string));
+    const flag = logged.find((l) => l.event === 'crisis_flag');
+    expect(flag).toBeDefined();
+    expect(flag.conversation_id).toBe(CONV_ID);
+    expect(flag.user_id).toBe(USER_ID);
+
+    warnSpy.mockRestore();
+  });
+
+  it('does NOT log a crisis_flag warning for an ordinary response', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    makeStreamOrchestrator(['Hello', ', ', 'world']);
+
+    await collectSSE(`/v1/conversations/${CONV_ID}/messages`, { content: 'hi' });
+
+    const logged = warnSpy.mock.calls.map((c) => JSON.parse(c[0] as string));
+    expect(logged.find((l) => l.event === 'crisis_flag')).toBeUndefined();
+
+    warnSpy.mockRestore();
+  });
+
+  it('still emits token frames in real time for ordinary (non-crisis) responses', async () => {
+    // Regression guard: the sentinel-aware buffering must not delay or
+    // merge tokens for the common case where no sentinel is ever sent.
+    makeStreamOrchestrator(['Hello', ', ', 'world']);
+
+    const res = await collectSSE(`/v1/conversations/${CONV_ID}/messages`, { content: 'hi' });
+    const frames = parseSSEFrames(res.body as string);
+    const tokens = frames.filter((f) => f.event === 'token');
+
+    expect(tokens).toHaveLength(3);
+    expect((tokens[0].data as { delta: string }).delta).toBe('Hello');
+    expect((tokens[1].data as { delta: string }).delta).toBe(', ');
+    expect((tokens[2].data as { delta: string }).delta).toBe('world');
   });
 });
