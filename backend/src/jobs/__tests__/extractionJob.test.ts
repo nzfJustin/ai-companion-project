@@ -55,6 +55,16 @@ jest.mock('../../ai/instance', () => ({
   aiOrchestrationService: { complete: mockComplete },
 }));
 
+// T-008: streak tracking is exercised by its own unit tests
+// (streakService.test.ts) — mocked here as a no-op so these tests stay
+// focused on the memory/emotional_snapshot write path.
+const mockUpdateStreak     = jest.fn().mockResolvedValue(undefined);
+const mockGetUserTimezone  = jest.fn().mockResolvedValue('UTC');
+jest.mock('../../services/streakService', () => ({
+  updateStreak:    (...args: unknown[]) => mockUpdateStreak(...args),
+  getUserTimezone: (...args: unknown[]) => mockGetUserTimezone(...args),
+}));
+
 // ─── Imports ────────────────────────────────────────────────────────────────────
 
 import { runExtractionJob, markConversation } from '../extractionJob';

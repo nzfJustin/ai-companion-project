@@ -2,17 +2,18 @@
  * src/routes/v1/users.router.ts
  *
  * User profile routes:
- *   GET   /v1/users/me   (P1-08 / TDD P1-005) ✓
- *   PATCH /v1/users/me   (P1-08 / TDD P1-005) ✓
+ *   GET   /v1/users/me          (P1-08 / TDD P1-005) ✓
+ *   PATCH /v1/users/me          (P1-08 / TDD P1-005) ✓
+ *   GET   /v1/users/me/streak   (T-008) ✓
  *
- * Both require authentication (Bearer access token).
+ * All routes require authentication (Bearer access token).
  */
 
 import { Router } from 'express';
 import { z }      from 'zod';
 import { eq }     from 'drizzle-orm';
 import { db }     from '../../db';
-import { users, commStyleEnum } from '../../db/schema';
+import { users, userStreaks, commStyleEnum } from '../../db/schema';
 import { authenticate }  from '../../middleware/authenticate';
 import { globalRateLimit } from '../../middleware/rateLimit';
 import { validate, displayNameSchema } from '../../middleware/validate';
@@ -175,6 +176,38 @@ usersRouter.patch(
       }
 
       return res.status(200).json(toMeResponse(user));
+    } catch (err) {
+      return next(err);
+    }
+  },
+);
+
+// ─── GET /v1/users/me/streak (T-008) ──────────────────────────────────────────
+
+/**
+ * Returns the authenticated user's current streak stats.
+ * Gracefully returns zeros if no streak row exists yet (user hasn't
+ * completed their first conversation extraction).
+ */
+usersRouter.get(
+  '/me/streak',
+  async (req, res, next) => {
+    try {
+      const [row] = await db
+        .select({
+          currentStreak:  userStreaks.currentStreak,
+          longestStreak:  userStreaks.longestStreak,
+          lastActiveDate: userStreaks.lastActiveDate,
+        })
+        .from(userStreaks)
+        .where(eq(userStreaks.userId, req.userId!))
+        .limit(1);
+
+      return res.status(200).json({
+        current_streak:   row?.currentStreak  ?? 0,
+        longest_streak:   row?.longestStreak  ?? 0,
+        last_active_date: row?.lastActiveDate ?? null,
+      });
     } catch (err) {
       return next(err);
     }
