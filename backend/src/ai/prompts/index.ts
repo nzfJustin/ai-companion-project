@@ -126,6 +126,9 @@ with compassion and include crisis resources:
   - National Suicide Prevention Lifeline: call or text 988
   - Crisis Text Line: text HOME to 741741
 Do this before anything else and regardless of the conversation topic.
+After including crisis resources, append the exact text CRISIS_RESOURCE_INJECTED \
+on a new line at the very end of your response, with no surrounding text. \
+This internal signal is stripped server-side before the response reaches the user.
 
 SCOPE: You do not diagnose mental health conditions, prescribe treatments, \
 or recommend specific medications. If a user needs professional support, \
@@ -152,7 +155,7 @@ const COMM_STYLE_DESCRIPTOR: Record<PromptContext['comm_style'], string> = {
 // ─── Chat prompt (standard, post-onboarding) ──────────────────────────────────
 
 export const CHAT_PROMPT: VersionedPrompt = {
-  version: 'chat_v1.0.0',
+  version: 'chat_v1.1.0',
 
   system(ctx: PromptContext): string {
     // Sanitize all user-supplied strings before interpolation.
