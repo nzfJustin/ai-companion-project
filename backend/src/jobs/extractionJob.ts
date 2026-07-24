@@ -40,6 +40,7 @@ import { aiOrchestrationService }  from '../ai/instance';
 import { MemoryExtractionSchema }  from '../ai/schemas/extraction';
 import type { MemoryExtractionResult } from '../ai/schemas/extraction';
 import { log, warn, logError }    from '../lib/logger';
+import { updateStreak, getUserTimezone } from '../services/streakService';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -195,6 +196,9 @@ export async function runExtractionJob(
     const { ciphertext: summaryCiphertext, iv: summaryIv } = enc.encrypt(result.summary);
     const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
 
+    // Fetch user timezone before opening the transaction (non-blocking fallback to UTC)
+    const userTimezone = await getUserTimezone(db, userId);
+
     await db.transaction(async (tx) => {
       // Insert memory
       const [memory] = await tx
@@ -233,6 +237,11 @@ export async function runExtractionJob(
         .update(conversations)
         .set({ status: 'summarized' })
         .where(eq(conversations.id, conversationId));
+
+      // ── T-008: Update streak (atomic with memory write) ───────────────────
+      // If the streak update fails the whole transaction rolls back — memories
+      // and emotional_snapshots are never orphaned from the streak counter.
+      await updateStreak(tx, userId, userTimezone);
     });
 
     log({

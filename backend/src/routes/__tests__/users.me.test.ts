@@ -12,6 +12,7 @@ jest.mock('../../db', () => ({
   db: {
     query:  { users: { findFirst: jest.fn() } },
     update: jest.fn(),
+    select: jest.fn(),
   },
 }));
 
@@ -260,5 +261,59 @@ describe('PATCH /v1/users/me', () => {
 
     expect(res.status).toBe(400);
     expect(res.body.error).toBe('VALIDATION_ERROR');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// T-008 — GET /v1/users/me/streak
+// ─────────────────────────────────────────────────────────────────────────────
+
+const mockSelect = db.select as jest.MockedFunction<typeof db.select>;
+
+function setupStreakSelect(row: object | null) {
+  const limit = jest.fn().mockResolvedValue(row ? [row] : []);
+  const where  = jest.fn().mockReturnValue({ limit });
+  const from   = jest.fn().mockReturnValue({ where });
+  mockSelect.mockReturnValue({ from } as never);
+}
+
+describe('GET /v1/users/me/streak', () => {
+  it('returns current_streak, longest_streak, last_active_date when a row exists', async () => {
+    setupStreakSelect({
+      currentStreak:  5,
+      longestStreak:  12,
+      lastActiveDate: '2026-01-14',
+    });
+
+    const res = await request(app)
+      .get('/v1/users/me/streak')
+      .set('Authorization', authHeader);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      current_streak:   5,
+      longest_streak:   12,
+      last_active_date: '2026-01-14',
+    });
+  });
+
+  it('returns zeros and null when no streak row exists yet', async () => {
+    setupStreakSelect(null);
+
+    const res = await request(app)
+      .get('/v1/users/me/streak')
+      .set('Authorization', authHeader);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      current_streak:   0,
+      longest_streak:   0,
+      last_active_date: null,
+    });
+  });
+
+  it('returns 401 without an auth token', async () => {
+    const res = await request(app).get('/v1/users/me/streak');
+    expect(res.status).toBe(401);
   });
 });
