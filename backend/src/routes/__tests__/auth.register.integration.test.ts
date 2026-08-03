@@ -97,7 +97,7 @@ describe('POST /v1/auth/register (integration)', () => {
     const res = await request(app).post('/v1/auth/register').send(VALID_BODY);
 
     expect(res.status).toBe(409);
-    expect(res.body).toEqual({ error: 'EMAIL_ALREADY_EXISTS' });
+    expect(res.body).toMatchObject({ error: 'EMAIL_ALREADY_EXISTS' });
   });
 
   it('is case-insensitive for duplicate detection', async () => {

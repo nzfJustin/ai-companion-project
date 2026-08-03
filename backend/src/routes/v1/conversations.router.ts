@@ -25,7 +25,7 @@
 
 import { Router }           from 'express';
 import { z }                from 'zod';
-import { eq, desc, sql }    from 'drizzle-orm';
+import { eq, and, desc, sql } from 'drizzle-orm';
 import type { Response }    from 'express';
 
 import { db }                from '../../db';
@@ -188,6 +188,20 @@ function writeSseEvent(
 
 conversationsRouter.post('/', async (req, res, next) => {
   try {
+    // Only one active conversation per user at a time — the client (see
+    // ConversationHistoryScreen) pins a single "active" conversation above
+    // the history list and has no UI for juggling more than one.
+    const existingActive = await db.query.conversations.findFirst({
+      where: and(
+        eq(conversations.userId, req.userId!),
+        eq(conversations.status, 'active'),
+      ),
+    });
+
+    if (existingActive) {
+      return next(new AppError(409, 'ACTIVE_CONVERSATION_EXISTS'));
+    }
+
     const [conv] = await db
       .insert(conversations)
       .values({ userId: req.userId! })

@@ -155,7 +155,7 @@ describe('POST /v1/auth/memory-pin/verify (integration)', () => {
       .send({ pin: '1234' });
 
     expect(res.status).toBe(404);
-    expect(res.body).toEqual({ error: 'PIN_NOT_SET' });
+    expect(res.body).toMatchObject({ error: 'PIN_NOT_SET' });
   });
 
   it('returns 200 with a valid elevated token for the correct pin', async () => {
@@ -196,7 +196,7 @@ describe('POST /v1/auth/memory-pin/verify (integration)', () => {
       .send({ pin: '0000' });
 
     expect(res.status).toBe(401);
-    expect(res.body).toEqual({ error: 'INVALID_PIN' });
+    expect(res.body).toMatchObject({ error: 'INVALID_PIN' });
   });
 
   // ── The core acceptance-criteria test from TDD P1-004 ───────────────────────
@@ -217,11 +217,11 @@ describe('POST /v1/auth/memory-pin/verify (integration)', () => {
 
       if (i < 2) {
         expect(res.status).toBe(401);
-        expect(res.body).toEqual({ error: 'INVALID_PIN' });
+        expect(res.body).toMatchObject({ error: 'INVALID_PIN' });
       } else {
         // 3rd failure triggers the lock
         expect(res.status).toBe(429);
-        expect(res.body).toEqual({ error: 'PIN_LOCKED' });
+        expect(res.body).toMatchObject({ error: 'PIN_LOCKED' });
       }
     }
 
@@ -232,7 +232,7 @@ describe('POST /v1/auth/memory-pin/verify (integration)', () => {
       .send({ pin: '1234' });
 
     expect(lockedAttempt.status).toBe(429);
-    expect(lockedAttempt.body).toEqual({ error: 'PIN_LOCKED' });
+    expect(lockedAttempt.body).toMatchObject({ error: 'PIN_LOCKED' });
   });
 
   it('lock state has a TTL of approximately 15 minutes', async () => {

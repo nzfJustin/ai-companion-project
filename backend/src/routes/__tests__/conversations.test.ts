@@ -26,6 +26,30 @@ jest.mock('../../services/EncryptionService', () => ({
   })),
 }));
 
+// conversationsRouter applies globalRateLimit/aiRateLimit (redis.eval) and
+// also uses redis.lrange/redis.pipeline directly for the per-conversation
+// context cache. Mock all of it so this suite never depends on a real Redis
+// connection being reachable — matching the pattern in messages.test.ts.
+const mockRedisPipe = {
+  del:    jest.fn(),
+  rpush:  jest.fn(),
+  ltrim:  jest.fn(),
+  expire: jest.fn(),
+  exec:   jest.fn().mockResolvedValue(null),
+};
+mockRedisPipe.del.mockReturnValue(mockRedisPipe);
+mockRedisPipe.rpush.mockReturnValue(mockRedisPipe);
+mockRedisPipe.ltrim.mockReturnValue(mockRedisPipe);
+mockRedisPipe.expire.mockReturnValue(mockRedisPipe);
+
+const mockRedis = {
+  eval:     jest.fn().mockResolvedValue([1, 0]),
+  lrange:   jest.fn().mockResolvedValue([]),
+  pipeline: jest.fn().mockReturnValue(mockRedisPipe),
+};
+
+jest.mock('../../lib/redis', () => ({ redis: mockRedis }));
+
 // ── Imports ────────────────────────────────────────────────────────────────────
 
 import { generateKeyPairSync } from 'node:crypto';
@@ -123,6 +147,18 @@ describe('POST /v1/conversations', () => {
   it('returns 401 without auth', async () => {
     const res = await request(app).post('/v1/conversations');
     expect(res.status).toBe(401);
+  });
+
+  it('returns 409 ACTIVE_CONVERSATION_EXISTS when the user already has an active conversation', async () => {
+    mockConvFindFirst.mockResolvedValue(ACTIVE_CONV as never);
+
+    const res = await request(app)
+      .post('/v1/conversations')
+      .set('Authorization', authHeader);
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('ACTIVE_CONVERSATION_EXISTS');
+    expect(mockInsert).not.toHaveBeenCalled();
   });
 });
 

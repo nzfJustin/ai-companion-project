@@ -63,6 +63,9 @@
     "testMatch": [
       "**/*.test.ts"
     ],
+    "setupFiles": [
+      "<rootDir>/tests/integration/setup.ts"
+    ],
     "moduleFileExtensions": [
       "ts",
       "js"

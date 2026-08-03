@@ -98,7 +98,13 @@ describe('GET /v1/conversations (integration)', () => {
   it('returns the authenticated user\'s conversations in descending order', async () => {
     const token = await registerAndLogin(USER_A_EMAIL);
 
-    await request(app).post('/v1/conversations').set('Authorization', `Bearer ${token}`);
+    // Only one active conversation is allowed at a time — close the first
+    // before opening the second so both actually get created.
+    const firstRes = await request(app).post('/v1/conversations').set('Authorization', `Bearer ${token}`);
+    await request(app)
+      .patch(`/v1/conversations/${firstRes.body.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ status: 'closed' });
     await request(app).post('/v1/conversations').set('Authorization', `Bearer ${token}`);
 
     const res = await request(app)

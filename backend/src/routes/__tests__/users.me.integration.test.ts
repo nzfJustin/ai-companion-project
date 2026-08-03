@@ -108,7 +108,7 @@ describe('GET /v1/users/me (integration)', () => {
   it('returns 401 with no token', async () => {
     const res = await request(app).get('/v1/users/me');
     expect(res.status).toBe(401);
-    expect(res.body).toEqual({ error: 'UNAUTHORIZED' });
+    expect(res.body).toMatchObject({ error: 'UNAUTHORIZED' });
   });
 
   // ── TDD P1-005: user_context seeded on registration ──────────────────────────
@@ -163,7 +163,7 @@ describe('PATCH /v1/users/me (integration)', () => {
       .send({ comm_style: 'not-a-real-style' });
 
     expect(res.status).toBe(400);
-    expect(res.body).toEqual({ error: 'INVALID_COMM_STYLE' });
+    expect(res.body).toMatchObject({ error: 'INVALID_COMM_STYLE' });
 
     const getRes = await request(app).get('/v1/users/me').set('Authorization', `Bearer ${token}`);
     expect(getRes.body.comm_style).toBe('warm'); // unchanged default

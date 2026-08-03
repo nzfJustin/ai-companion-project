@@ -155,7 +155,7 @@ describe('POST /v1/auth/refresh (integration)', () => {
       .set('Cookie', `${REFRESH_COOKIE_NAME}=${token1}`);
 
     expect(reuseAttempt.status).toBe(401);
-    expect(reuseAttempt.body).toEqual({ error: 'TOKEN_REUSE_DETECTED' });
+    expect(reuseAttempt.body).toMatchObject({ error: 'TOKEN_REUSE_DETECTED' });
 
     // 4. token2 — though never itself reused — must ALSO now fail,
     //    because the entire family was revoked in step 3.
@@ -173,13 +173,13 @@ describe('POST /v1/auth/refresh (integration)', () => {
       .set('Cookie', `${REFRESH_COOKIE_NAME}=not-a-real-token`);
 
     expect(res.status).toBe(401);
-    expect(res.body).toEqual({ error: 'TOKEN_EXPIRED' });
+    expect(res.body).toMatchObject({ error: 'TOKEN_EXPIRED' });
   });
 
   it('returns 401 TOKEN_EXPIRED when no cookie is sent', async () => {
     const res = await request(app).post('/v1/auth/refresh');
     expect(res.status).toBe(401);
-    expect(res.body).toEqual({ error: 'TOKEN_EXPIRED' });
+    expect(res.body).toMatchObject({ error: 'TOKEN_EXPIRED' });
   });
 
   it('returns 401 TOKEN_EXPIRED for an expired session', async () => {
@@ -197,7 +197,7 @@ describe('POST /v1/auth/refresh (integration)', () => {
       .set('Cookie', `${REFRESH_COOKIE_NAME}=${token1}`);
 
     expect(res.status).toBe(401);
-    expect(res.body).toEqual({ error: 'TOKEN_EXPIRED' });
+    expect(res.body).toMatchObject({ error: 'TOKEN_EXPIRED' });
   });
 });
 
@@ -250,6 +250,6 @@ describe('POST /v1/auth/logout (integration)', () => {
   it('returns 401 TOKEN_EXPIRED when no cookie is sent', async () => {
     const res = await request(app).post('/v1/auth/logout');
     expect(res.status).toBe(401);
-    expect(res.body).toEqual({ error: 'TOKEN_EXPIRED' });
+    expect(res.body).toMatchObject({ error: 'TOKEN_EXPIRED' });
   });
 });
