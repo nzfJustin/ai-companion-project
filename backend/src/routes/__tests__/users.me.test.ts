@@ -16,6 +16,14 @@ jest.mock('../../db', () => ({
   },
 }));
 
+// usersRouter applies globalRateLimit, which calls redis.eval() directly.
+// Mock it (always "allowed") so this suite never depends on a real Redis
+// connection being reachable — matching the pattern in memories.test.ts /
+// auth.memoryPin.test.ts / messages.test.ts.
+jest.mock('../../lib/redis', () => ({
+  redis: { eval: jest.fn().mockResolvedValue([1, 0]) },
+}));
+
 // ── Imports ───────────────────────────────────────────────────────────────────
 
 import { generateKeyPairSync } from 'node:crypto';

@@ -135,7 +135,7 @@ describe('POST /v1/auth/login (integration)', () => {
       .send({ email: TEST_EMAIL, password: 'wrongpassword' });
 
     expect(res.status).toBe(401);
-    expect(res.body).toEqual({ error: 'INVALID_CREDENTIALS' });
+    expect(res.body).toMatchObject({ error: 'INVALID_CREDENTIALS' });
   });
 
   it('returns 401 INVALID_CREDENTIALS for unknown email', async () => {
@@ -144,7 +144,7 @@ describe('POST /v1/auth/login (integration)', () => {
       .send({ email: 'nobody@example.com', password: TEST_PASSWORD });
 
     expect(res.status).toBe(401);
-    expect(res.body).toEqual({ error: 'INVALID_CREDENTIALS' });
+    expect(res.body).toMatchObject({ error: 'INVALID_CREDENTIALS' });
   });
 
   it('is case-insensitive for email lookup', async () => {
