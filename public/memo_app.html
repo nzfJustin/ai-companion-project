@@ -1,0 +1,766 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Memo · AI Companion</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; background: #0B0C17; }
+body { display: flex; justify-content: center; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #E8E5FF; }
+#root { width: 100%; max-width: 430px; min-height: 100vh; display: flex; flex-direction: column; background: #0B0C17; position: relative; overflow: hidden; }
+
+:root {
+  --bg: #0B0C17; --s1: #13152A; --s2: #1B1E36; --s3: #232643;
+  --acc: #7C6CF0; --acc2: #5A4DD6; --acc-s: rgba(124,108,240,0.12); --acc-b: rgba(124,108,240,0.28);
+  --txt: #E8E5FF; --txt2: #9B98C8; --txt3: #56547A;
+  --bdr: rgba(255,255,255,0.07); --bdr2: rgba(255,255,255,0.13);
+  --grn: #34D399; --red: #F87171; --rad: 12px;
+}
+
+/* LAYOUT */
+.screen { flex: 1; display: flex; flex-direction: column; overflow-y: auto; overflow-x: hidden; min-height: 0; }
+.center { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; padding: 40px 28px; gap: 28px; }
+
+/* BRAND */
+.logo { font-size: 30px; font-weight: 700; letter-spacing: -0.04em; }
+.logo em { color: var(--acc); font-style: normal; }
+.tagline { font-size: 13px; color: var(--txt3); margin-top: 4px; }
+
+/* CARD */
+.card { background: var(--s1); border: 1px solid var(--bdr); border-radius: var(--rad); padding: 20px; }
+
+/* FORMS */
+.form { width: 100%; max-width: 340px; display: flex; flex-direction: column; gap: 14px; }
+label { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--txt3); display: block; margin-bottom: 5px; }
+input[type=text], input[type=email], input[type=password], input[type=url] {
+  width: 100%; background: var(--s2); border: 1px solid var(--bdr2); border-radius: 8px;
+  padding: 12px 14px; color: var(--txt); font-size: 15px; outline: none; transition: border-color .15s;
+}
+input:focus { border-color: var(--acc-b); }
+input::placeholder { color: var(--txt3); }
+
+/* BUTTONS */
+.btn-p { background: var(--acc); color: #fff; border: none; border-radius: 10px; padding: 14px; font-size: 15px; font-weight: 600; cursor: pointer; width: 100%; transition: background .15s; letter-spacing: -0.01em; }
+.btn-p:hover { background: var(--acc2); }
+.btn-p:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn-g { background: none; border: 1px solid var(--bdr2); border-radius: 10px; padding: 12px; color: var(--txt2); font-size: 14px; cursor: pointer; width: 100%; transition: all .15s; }
+.btn-g:hover { background: var(--s2); color: var(--txt); }
+.lnk { background: none; border: none; color: var(--acc); font-size: 13px; cursor: pointer; padding: 0; }
+.divider { display: flex; align-items: center; gap: 10px; color: var(--txt3); font-size: 12px; }
+.divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: var(--bdr); }
+
+/* ERROR */
+.err { background: rgba(248,113,113,.1); border: 1px solid rgba(248,113,113,.25); border-radius: 8px; padding: 10px 14px; font-size: 13px; color: var(--red); line-height: 1.4; }
+
+/* TOPBAR */
+.topbar { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px 12px; border-bottom: 1px solid var(--bdr); background: var(--bg); position: sticky; top: 0; z-index: 10; flex-shrink: 0; }
+.topbar-t { font-size: 16px; font-weight: 600; }
+.topbar-s { font-size: 11px; color: var(--txt3); margin-top: 2px; }
+.ico-btn { background: none; border: none; color: var(--txt2); cursor: pointer; font-size: 18px; padding: 6px; border-radius: 8px; line-height: 1; }
+.ico-btn:hover { color: var(--txt); background: var(--s2); }
+
+/* BOTTOM NAV */
+.bnav { display: flex; border-top: 1px solid var(--bdr); background: var(--bg); flex-shrink: 0; }
+.bnav-btn { flex: 1; display: flex; flex-direction: column; align-items: center; padding: 10px 0 13px; gap: 3px; border: none; background: none; color: var(--txt3); font-size: 10px; cursor: pointer; transition: color .15s; }
+.bnav-btn.on { color: var(--acc); }
+.bnav-icon { font-size: 21px; line-height: 1; }
+
+/* CHAT */
+.chat-body { flex: 1; overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 14px; min-height: 0; }
+.msg { display: flex; flex-direction: column; gap: 4px; max-width: 84%; }
+.msg.u { align-self: flex-end; align-items: flex-end; }
+.msg.a { align-self: flex-start; align-items: flex-start; }
+.bubble { padding: 11px 15px; border-radius: 18px; font-size: 15px; line-height: 1.55; word-break: break-word; white-space: pre-wrap; }
+.bubble.u { background: var(--acc); color: #fff; border-bottom-right-radius: 4px; }
+.bubble.a { background: var(--s2); color: var(--txt); border-bottom-left-radius: 4px; }
+.bubble.typing::after { content: '▋'; color: var(--acc); animation: blink .7s step-end infinite; margin-left: 1px; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+.emo-pill { font-size: 10px; color: var(--txt3); padding: 2px 9px; background: var(--s1); border-radius: 99px; border: 1px solid var(--bdr); }
+.chat-input-bar { display: flex; gap: 8px; padding: 10px 14px 14px; border-top: 1px solid var(--bdr); background: var(--bg); flex-shrink: 0; }
+.chat-ta { flex: 1; background: var(--s2); border: 1px solid var(--bdr2); border-radius: 22px; padding: 10px 16px; color: var(--txt); font-size: 15px; outline: none; resize: none; font-family: inherit; line-height: 1.4; max-height: 120px; }
+.chat-ta:focus { border-color: var(--acc-b); }
+.chat-ta::placeholder { color: var(--txt3); }
+.send-btn { background: var(--acc); border: none; border-radius: 50%; width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; color: #fff; font-size: 17px; transition: background .15s; align-self: flex-end; }
+.send-btn:hover { background: var(--acc2); }
+.send-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+/* MEMORIES */
+.list-wrap { padding: 14px; display: flex; flex-direction: column; gap: 8px; }
+.mem-card { background: var(--s1); border: 1px solid var(--bdr); border-radius: var(--rad); padding: 14px 16px; cursor: pointer; transition: background .15s; }
+.mem-card:hover { background: var(--s2); border-color: var(--bdr2); }
+.mem-title { font-size: 14px; font-weight: 500; margin-bottom: 6px; }
+.mem-meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.mem-date { font-size: 12px; color: var(--txt3); }
+.emo-badge { font-size: 11px; padding: 2px 9px; border-radius: 99px; background: var(--acc-s); color: var(--acc); border: 1px solid var(--acc-b); }
+.lv-badge { font-size: 10px; padding: 2px 7px; border-radius: 5px; background: var(--s3); color: var(--txt2); }
+
+/* DETAIL */
+.detail-wrap { padding: 18px; display: flex; flex-direction: column; gap: 12px; flex: 1; overflow-y: auto; }
+.detail-card { background: var(--s1); border: 1px solid var(--bdr); border-radius: var(--rad); padding: 16px; }
+.sec-label { font-size: 10px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--txt3); margin-bottom: 10px; }
+.detail-body { font-size: 14px; color: var(--txt); line-height: 1.65; }
+.ke-list { display: flex; flex-direction: column; gap: 7px; }
+.ke { font-size: 13px; color: var(--txt2); display: flex; gap: 9px; align-items: baseline; }
+.ke-dot { color: var(--acc); flex-shrink: 0; font-size: 16px; line-height: 1; }
+.tag-row { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* TRENDS */
+.trends-wrap { padding: 16px; display: flex; flex-direction: column; gap: 12px; flex: 1; overflow-y: auto; }
+.stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.stat-card { background: var(--s1); border: 1px solid var(--bdr); border-radius: var(--rad); padding: 16px; text-align: center; }
+.stat-big { font-size: 36px; font-weight: 700; letter-spacing: -0.04em; color: var(--acc); }
+.stat-lbl { font-size: 12px; color: var(--txt3); margin-top: 4px; }
+.emo-bars { display: flex; flex-direction: column; gap: 10px; }
+.emo-row { display: flex; align-items: center; gap: 10px; }
+.emo-name { font-size: 12px; color: var(--txt2); width: 76px; flex-shrink: 0; }
+.emo-track { flex: 1; height: 6px; background: var(--s2); border-radius: 99px; overflow: hidden; }
+.emo-fill { height: 100%; border-radius: 99px; transition: width .4s ease; }
+.emo-pct { font-size: 11px; color: var(--txt3); width: 32px; text-align: right; }
+
+/* SETTINGS */
+.settings-wrap { padding: 16px; display: flex; flex-direction: column; gap: 6px; flex: 1; overflow-y: auto; }
+.sec-head { font-size: 11px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--txt3); padding: 12px 4px 5px; }
+.srow { background: var(--s1); border: 1px solid var(--bdr); border-radius: 10px; padding: 13px 16px; display: flex; align-items: center; justify-content: space-between; }
+.srow + .srow { margin-top: 2px; }
+.srow-lbl { font-size: 14px; color: var(--txt); }
+.srow-val { font-size: 13px; color: var(--txt3); }
+.srow.danger { border-color: rgba(248,113,113,0.2); cursor: pointer; }
+.srow.danger .srow-lbl { color: var(--red); }
+.srow.danger:hover { background: rgba(248,113,113,0.06); }
+select.inline { background: var(--s2); border: 1px solid var(--bdr2); border-radius: 6px; color: var(--txt); padding: 5px 10px; font-size: 13px; outline: none; cursor: pointer; }
+select.inline:focus { border-color: var(--acc-b); }
+
+/* EMPTY / SPINNER */
+.empty { text-align: center; padding: 56px 28px; }
+.empty-icon { font-size: 40px; margin-bottom: 14px; }
+.empty-h { font-size: 16px; font-weight: 500; color: var(--txt2); margin-bottom: 6px; }
+.empty-s { font-size: 13px; color: var(--txt3); line-height: 1.5; }
+.spin { width: 28px; height: 28px; border: 2px solid var(--bdr2); border-top-color: var(--acc); border-radius: 50%; animation: spin .6s linear infinite; margin: 40px auto; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* AVATAR */
+.avatar { width: 46px; height: 46px; border-radius: 50%; background: var(--acc-s); border: 1px solid var(--acc-b); display: flex; align-items: center; justify-content: center; font-size: 19px; font-weight: 600; color: var(--acc); flex-shrink: 0; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+
+// ─── STATE ────────────────────────────────────────────────────────────────────
+const S = {
+  screen: 'loading',
+  token: null,
+  user: null,
+  convId: null,
+  msgs: [],
+  memories: [],
+  memDetail: null,
+  trends: [],
+  streak: null,
+  streaming: false,
+  error: null,
+  loading: false,
+  nav: 'chat',
+  cfg: { url: '' },
+};
+
+// ─── PERSIST ─────────────────────────────────────────────────────────────────
+function load() {
+  try {
+    const d = JSON.parse(localStorage.getItem('memo_v1') || '{}');
+    S.cfg.url = d.url || '';
+    S.token = d.token || null;
+  } catch(e) {}
+}
+function save() {
+  try { localStorage.setItem('memo_v1', JSON.stringify({ url: S.cfg.url, token: S.token })); } catch(e) {}
+}
+
+// ─── API ─────────────────────────────────────────────────────────────────────
+const base = () => S.cfg.url.replace(/\/$/, '');
+
+async function api(method, path, body, _retry = true) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (S.token) headers['Authorization'] = 'Bearer ' + S.token;
+  let res;
+  try {
+    res = await fetch(base() + path, {
+      method, headers,
+      body: body ? JSON.stringify(body) : undefined,
+      credentials: 'include',
+    });
+  } catch(e) { throw new Error('Cannot reach backend. Check your URL and CORS config.'); }
+
+  if (res.status === 401 && _retry) {
+    const ok = await tryRefresh();
+    if (ok) return api(method, path, body, false);
+    S.token = null; S.user = null; save();
+    go('login'); return res;
+  }
+  return res;
+}
+
+async function tryRefresh() {
+  try {
+    const res = await fetch(base() + '/v1/auth/refresh', { method: 'POST', credentials: 'include' });
+    if (!res.ok) return false;
+    const d = await res.json();
+    if (d.access_token) { S.token = d.access_token; save(); return true; }
+  } catch(e) {}
+  return false;
+}
+
+// ─── ACTIONS ─────────────────────────────────────────────────────────────────
+async function doLogin(email, pwd) {
+  S.loading = true; S.error = null; render();
+  try {
+    const res = await fetch(base() + '/v1/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password: pwd }),
+      credentials: 'include',
+    });
+    const d = await res.json();
+    if (!res.ok) { S.error = codeMsg(d); S.loading = false; render(); return; }
+    S.token = d.access_token || d.token; save();
+    await loadUser();
+    S.loading = false;
+    await afterAuth();
+  } catch(e) { S.error = e.message; S.loading = false; render(); }
+}
+
+async function doRegister(name, email, pwd) {
+  S.loading = true; S.error = null; render();
+  try {
+    const res = await fetch(base() + '/v1/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ display_name: name, email, password: pwd }),
+      credentials: 'include',
+    });
+    const d = await res.json();
+    if (!res.ok) { S.error = codeMsg(d); S.loading = false; render(); return; }
+    await doLogin(email, pwd);
+  } catch(e) { S.error = e.message; S.loading = false; render(); }
+}
+
+async function afterAuth() {
+  if (!S.user) { S.screen = 'login'; render(); return; }
+  if (!S.user.onboarding_done) {
+    S.screen = 'onboarding';
+    await startConversation(); render();
+  } else {
+    S.screen = 'main'; S.nav = 'chat';
+    await loadOrCreateConv(); render();
+  }
+}
+
+async function loadUser() {
+  try {
+    const res = await api('GET', '/v1/users/me', null, false);
+    if (res && res.ok) S.user = await res.json();
+  } catch(e) {}
+}
+
+async function loadOrCreateConv() {
+  // Try to find an active conversation
+  try {
+    const res = await api('GET', '/v1/conversations?per_page=5');
+    if (res && res.ok) {
+      const d = await res.json();
+      const convs = d.conversations || d.data || (Array.isArray(d) ? d : []);
+      const active = convs.find(c => c.status === 'active');
+      if (active) { S.convId = active.id; return; }
+    }
+  } catch(e) {}
+  await startConversation();
+}
+
+async function startConversation() {
+  try {
+    const res = await api('POST', '/v1/conversations', {});
+    if (res && res.ok) { const d = await res.json(); S.convId = d.id; S.msgs = []; }
+  } catch(e) {}
+}
+
+async function doSend(content) {
+  if (!content.trim() || S.streaming || !S.convId) return;
+  S.streaming = true;
+
+  const uid = 'u' + Date.now();
+  const aid = 'a' + Date.now();
+  S.msgs.push({ role: 'user', content, id: uid });
+  S.msgs.push({ role: 'ai', content: '', id: aid, typing: true });
+  renderMsgs(); scrollChat();
+
+  try {
+    const res = await fetch(base() + `/v1/conversations/${S.convId}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + S.token },
+      body: JSON.stringify({ content }),
+      credentials: 'include',
+    });
+
+    if (!res.ok || !res.body) {
+      patchMsg(aid, { content: 'Something went wrong. Try again.', typing: false });
+      S.streaming = false; return;
+    }
+
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '', evType = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop() || '';
+
+      for (const line of lines) {
+        const t = line.trim();
+        if (t.startsWith('event: ')) { evType = t.slice(7).trim(); continue; }
+        if (t.startsWith('data: ') && evType) {
+          try {
+            const data = JSON.parse(t.slice(6));
+            if (evType === 'token' && data.delta) {
+              appendMsg(aid, data.delta); scrollChat();
+            } else if (evType === 'done') {
+              patchMsg(aid, { typing: false, emotion: data.emotion_tags });
+              S.streaming = false;
+              if (S.screen === 'onboarding') checkOnboardingDone();
+            } else if (evType === 'error') {
+              const txt = data.code === 'LLM_TIMEOUT' ? "I'm having a quiet moment — could you share that again?" : 'Something went wrong.';
+              patchMsg(aid, { content: txt, typing: false });
+              S.streaming = false;
+            }
+          } catch(e) {}
+          evType = '';
+        }
+      }
+    }
+  } catch(e) {
+    patchMsg(aid, { content: 'Connection lost. Please try again.', typing: false });
+    S.streaming = false;
+  }
+}
+
+async function checkOnboardingDone() {
+  await loadUser();
+  if (S.user?.onboarding_done) {
+    setTimeout(async () => { S.screen = 'main'; S.nav = 'chat'; await loadOrCreateConv(); render(); }, 1000);
+  }
+}
+
+function appendMsg(id, delta) {
+  const m = S.msgs.find(m => m.id === id);
+  if (!m) return;
+  m.content += delta;
+  const el = $('bbl-' + id);
+  if (el) el.textContent = m.content;
+}
+
+function patchMsg(id, patch) {
+  const m = S.msgs.find(m => m.id === id);
+  if (!m) return;
+  Object.assign(m, patch);
+  renderMsgs();
+}
+
+async function doCloseConv() {
+  if (!S.convId) return;
+  try {
+    await api('PATCH', `/v1/conversations/${S.convId}`, { status: 'closed' });
+    S.msgs = []; S.convId = null;
+    await startConversation(); render();
+  } catch(e) {}
+}
+
+async function doLogout() {
+  try { await api('POST', '/v1/auth/logout'); } catch(e) {}
+  S.token = null; S.user = null; S.msgs = []; S.convId = null;
+  S.memories = []; S.trends = []; S.streak = null;
+  save(); go('login');
+}
+
+async function loadMemories() {
+  S.loading = true; render();
+  try {
+    const res = await api('GET', '/v1/memories');
+    if (res && res.ok) {
+      const d = await res.json();
+      S.memories = d.memories || d.data || (Array.isArray(d) ? d : []);
+    }
+  } catch(e) {}
+  S.loading = false; render();
+}
+
+async function openMemory(id) {
+  try {
+    const res = await api('GET', `/v1/memories/${id}`);
+    if (res && res.ok) { S.memDetail = await res.json(); S.screen = 'mem_detail'; render(); }
+  } catch(e) {}
+}
+
+async function loadTrends() {
+  S.loading = true; render();
+  try {
+    const [tr, sr] = await Promise.all([
+      api('GET', '/v1/insights/trends'),
+      api('GET', '/v1/users/me/streak'),
+    ]);
+    if (tr && tr.ok) { const d = await tr.json(); S.trends = Array.isArray(d) ? d : []; }
+    if (sr && sr.ok) S.streak = await sr.json();
+  } catch(e) {}
+  S.loading = false; render();
+}
+
+async function doUpdateProfile(data) {
+  try {
+    const res = await api('PATCH', '/v1/users/me', data);
+    if (res && res.ok) { S.user = await res.json(); render(); }
+  } catch(e) {}
+}
+
+// ─── NAV ─────────────────────────────────────────────────────────────────────
+async function switchNav(tab) {
+  S.nav = tab;
+  if (tab === 'memories' && !S.memories.length) await loadMemories();
+  else if (tab === 'trends' && !S.trends.length) await loadTrends();
+  else render();
+}
+
+function go(screen) { S.screen = screen; S.error = null; render(); }
+
+// ─── HELPERS ─────────────────────────────────────────────────────────────────
+function esc(s) {
+  return (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function codeMsg(d) {
+  const map = { EMAIL_ALREADY_EXISTS: 'That email is already registered.', INVALID_COMM_STYLE: 'Invalid communication style.', CONVERSATION_CLOSED: 'This conversation is closed.', TOKEN_EXPIRED: 'Session expired — please log in again.' };
+  return map[d?.error_code] || d?.message || d?.error || 'Something went wrong.';
+}
+function fmtDate(s) {
+  if (!s) return '';
+  return new Date(s).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+function scrollChat() {
+  const w = document.querySelector('.chat-body');
+  if (w) requestAnimationFrame(() => { w.scrollTop = w.scrollHeight; });
+}
+
+// ─── RENDER HELPERS ───────────────────────────────────────────────────────────
+function renderMsgs() {
+  const w = document.querySelector('.chat-body');
+  if (w) { w.innerHTML = msgsHTML(); scrollChat(); }
+}
+
+function msgsHTML() {
+  if (!S.msgs.length) {
+    const n = (S.user?.display_name || '').split(' ')[0] || 'there';
+    const sub = S.screen === 'onboarding' ? 'Tell me about yourself — your goals, how you\'re feeling, what\'s on your mind.' : 'What\'s on your mind today?';
+    return `<div class="empty"><div class="empty-icon">✦</div><div class="empty-h">Hey ${esc(n)}</div><div class="empty-s">${sub}</div></div>`;
+  }
+  return S.msgs.map(m => {
+    const isU = m.role === 'user';
+    const bcls = 'bubble ' + (isU ? 'u' : 'a') + (m.typing ? ' typing' : '');
+    const emo = (!isU && m.emotion?.primary) ? `<span class="emo-pill">${esc(m.emotion.primary)}</span>` : '';
+    return `<div class="msg ${isU ? 'u' : 'a'}">
+      <div class="${bcls}" id="bbl-${m.id}">${esc(m.content)}</div>${emo}
+    </div>`;
+  }).join('');
+}
+
+function chatInputBar(placeholder) {
+  return `<div class="chat-input-bar">
+    <textarea class="chat-ta" id="ci" placeholder="${placeholder}" rows="1"
+      onkeydown="onKey(event)" oninput="autoH(this)"></textarea>
+    <button class="send-btn" onclick="onSend()" ${S.streaming ? 'disabled' : ''}>➤</button>
+  </div>`;
+}
+
+function bnavHTML() {
+  const tabs = [['chat','💬','Chat'],['memories','🧠','Memories'],['trends','📈','Trends'],['settings','⚙️','Settings']];
+  return `<nav class="bnav">${tabs.map(([id,ic,lb]) =>
+    `<button class="bnav-btn ${S.nav===id?'on':''}" onclick="switchNav('${id}')">
+      <span class="bnav-icon">${ic}</span><span>${lb}</span>
+    </button>`).join('')}</nav>`;
+}
+
+// ─── SCREENS ─────────────────────────────────────────────────────────────────
+const screens = {
+
+  loading: () => `<div class="screen center"><div class="spin" style="width:34px;height:34px;border-width:3px"></div></div>`,
+
+  setup: () => `<div class="screen center">
+    <div style="text-align:center">
+      <div class="logo">me<em>mo</em></div>
+      <div class="tagline">Your AI memory companion</div>
+    </div>
+    <div class="form">
+      ${S.error ? `<div class="err">${esc(S.error)}</div>` : ''}
+      <div>
+        <label>Backend URL</label>
+        <input id="cfg-url" type="url" placeholder="https://your-app.railway.app" value="${esc(S.cfg.url)}" />
+      </div>
+      <div style="font-size:12px;color:var(--txt3);line-height:1.6">
+        Enter your Railway backend URL. This is saved locally and used for all API calls.
+      </div>
+      <button class="btn-p" onclick="onSetup()">Continue →</button>
+    </div>
+  </div>`,
+
+  login: () => `<div class="screen center">
+    <div style="text-align:center">
+      <div class="logo">me<em>mo</em></div>
+      <div class="tagline">Sign in to continue</div>
+    </div>
+    <div class="form">
+      ${S.error ? `<div class="err">${esc(S.error)}</div>` : ''}
+      <div><label>Email</label><input id="le" type="email" placeholder="you@example.com" autocomplete="email" onkeydown="if(event.key==='Enter')onLogin()" /></div>
+      <div><label>Password</label><input id="lp" type="password" placeholder="••••••••" autocomplete="current-password" onkeydown="if(event.key==='Enter')onLogin()" /></div>
+      <button class="btn-p" onclick="onLogin()" ${S.loading ? 'disabled' : ''}>${S.loading ? 'Signing in…' : 'Sign in'}</button>
+      <div class="divider">or</div>
+      <button class="btn-g" onclick="go('register')">Create account</button>
+      <div style="text-align:center;margin-top:4px">
+        <button class="lnk" onclick="go('setup')">Change backend URL</button>
+      </div>
+    </div>
+  </div>`,
+
+  register: () => `<div class="screen center">
+    <div style="text-align:center">
+      <div class="logo">me<em>mo</em></div>
+      <div class="tagline">Create your account</div>
+    </div>
+    <div class="form">
+      ${S.error ? `<div class="err">${esc(S.error)}</div>` : ''}
+      <div><label>Display name</label><input id="rn" type="text" placeholder="Your name" autocomplete="name" /></div>
+      <div><label>Email</label><input id="re" type="email" placeholder="you@example.com" autocomplete="email" /></div>
+      <div><label>Password</label><input id="rp" type="password" placeholder="Min 8 characters" autocomplete="new-password" /></div>
+      <button class="btn-p" onclick="onRegister()" ${S.loading ? 'disabled' : ''}>${S.loading ? 'Creating account…' : 'Create account'}</button>
+      <div style="text-align:center;margin-top:4px">
+        <button class="lnk" onclick="go('login')">Already have an account? Sign in</button>
+      </div>
+    </div>
+  </div>`,
+
+  onboarding: () => `
+    <div class="topbar">
+      <div><div class="topbar-t">Getting to know you</div><div class="topbar-s">This personalises your experience</div></div>
+    </div>
+    <div class="chat-body">${msgsHTML()}</div>
+    ${chatInputBar('Tell me about yourself…')}`,
+
+  main: () => {
+    switch(S.nav) {
+      case 'memories': return mainMemories();
+      case 'trends':   return mainTrends();
+      case 'settings': return mainSettings();
+      default:         return mainChat();
+    }
+  },
+
+  mem_detail: () => {
+    const m = S.memDetail;
+    if (!m) return '<div class="spin"></div>';
+    const evs = (m.key_events||[]).map(e => `<div class="ke"><span class="ke-dot">·</span>${esc(e)}</div>`).join('');
+    const tags = (m.emotional_tags||[]).map(t => `<span class="emo-badge">${esc(t)}</span>`).join('');
+    return `
+      <div class="topbar">
+        <button class="ico-btn" onclick="backMem()">← Back</button>
+        <div class="topbar-t">Memory</div>
+        <div></div>
+      </div>
+      <div class="detail-wrap">
+        ${m.summary ? `<div class="detail-card"><div class="sec-label">Summary</div><div class="detail-body">${esc(m.summary)}</div></div>` : ''}
+        ${evs ? `<div class="detail-card"><div class="sec-label">Key moments</div><div class="ke-list">${evs}</div></div>` : ''}
+        ${tags ? `<div class="detail-card"><div class="sec-label">Emotional themes</div><div class="tag-row">${tags}</div></div>` : ''}
+        ${m.dominant_emotion ? `<div class="detail-card"><div class="sec-label">Dominant emotion</div><span class="emo-badge">${esc(m.dominant_emotion)}</span></div>` : ''}
+      </div>`;
+  },
+};
+
+function mainChat() {
+  return `
+    <div class="topbar">
+      <div class="topbar-t" style="font-size:20px;font-weight:700;letter-spacing:-0.03em">me<span style="color:var(--acc)">mo</span></div>
+      <button class="ico-btn" title="End session and save memory" onclick="doCloseConv()">✕ End</button>
+    </div>
+    <div class="chat-body">${msgsHTML()}</div>
+    ${chatInputBar('What\'s on your mind?')}
+    ${bnavHTML()}`;
+}
+
+function mainMemories() {
+  let body;
+  if (S.loading) body = '<div class="spin"></div>';
+  else if (!S.memories.length) {
+    body = `<div class="empty"><div class="empty-icon">🧠</div>
+      <div class="empty-h">No memories yet</div>
+      <div class="empty-s">Close a conversation to generate your first memory. It may take up to 60 seconds.</div>
+      <button class="btn-g" style="margin-top:20px;width:auto;padding:10px 20px" onclick="loadMemories()">Refresh</button></div>`;
+  } else {
+    body = `<div class="list-wrap">${S.memories.map(m =>
+      `<div class="mem-card" onclick="openMemory('${esc(m.id)}')">
+        <div class="mem-title">${esc(m.title || 'Memory')}</div>
+        <div class="mem-meta">
+          <span class="mem-date">${fmtDate(m.created_at)}</span>
+          ${m.dominant_emotion ? `<span class="emo-badge">${esc(m.dominant_emotion)}</span>` : ''}
+          <span class="lv-badge">L${m.level || 1}</span>
+        </div>
+      </div>`).join('')}
+    </div>`;
+  }
+  return `<div class="topbar"><div class="topbar-t">Memories</div><button class="ico-btn" onclick="loadMemories()">↻</button></div>
+    <div class="screen">${body}</div>${bnavHTML()}`;
+}
+
+const EMO_C = { joy:'#FBBF24', calm:'#34D399', sadness:'#60A5FA', anxiety:'#A78BFA', anger:'#F87171', excitement:'#FB923C' };
+
+function mainTrends() {
+  if (S.loading) return `<div class="topbar"><div class="topbar-t">Trends</div></div><div class="spin"></div>${bnavHTML()}`;
+  const latest = S.trends[S.trends.length - 1];
+  const scores = latest?.emotion_scores || null;
+  const streakN = S.streak?.current_streak ?? '—';
+  const dom = latest?.dominant_emotion || '—';
+
+  const bars = scores ? Object.entries(scores).map(([emo,v]) => {
+    const pct = Math.round((v||0)*100);
+    return `<div class="emo-row">
+      <span class="emo-name">${esc(emo)}</span>
+      <div class="emo-track"><div class="emo-fill" style="width:${pct}%;background:${EMO_C[emo]||'var(--acc)'}"></div></div>
+      <span class="emo-pct">${pct}%</span>
+    </div>`;
+  }).join('') : '';
+
+  return `<div class="topbar"><div class="topbar-t">Trends</div><button class="ico-btn" onclick="loadTrends()">↻</button></div>
+    <div class="trends-wrap">
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-big">${streakN}</div><div class="stat-lbl">day streak 🔥</div></div>
+        <div class="stat-card"><div class="stat-big" style="font-size:22px;margin-top:6px">${esc(dom)}</div><div class="stat-lbl">today's tone</div></div>
+      </div>
+      ${scores ? `<div class="card"><div class="sec-label" style="margin-bottom:14px">Today's emotions</div><div class="emo-bars">${bars}</div></div>`
+               : `<div class="empty"><div class="empty-icon">📈</div><div class="empty-h">No trend data yet</div><div class="empty-s">Close a conversation first — emotional patterns appear after memory extraction.</div></div>`}
+    </div>${bnavHTML()}`;
+}
+
+function mainSettings() {
+  const u = S.user || {};
+  const init = (u.display_name || '?')[0].toUpperCase();
+  return `<div class="topbar"><div class="topbar-t">Settings</div></div>
+    <div class="settings-wrap">
+      <div class="card" style="margin-bottom:4px">
+        <div style="display:flex;align-items:center;gap:13px">
+          <div class="avatar">${esc(init)}</div>
+          <div>
+            <div style="font-size:15px;font-weight:500">${esc(u.display_name||'')}</div>
+            <div style="font-size:12px;color:var(--txt3);margin-top:2px">${esc(u.email||'')}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sec-head">Preferences</div>
+      <div class="srow">
+        <span class="srow-lbl">Communication style</span>
+        <select class="inline" onchange="doUpdateProfile({comm_style:this.value})">
+          <option value="warm" ${u.comm_style==='warm'?'selected':''}>Warm</option>
+          <option value="direct" ${u.comm_style==='direct'?'selected':''}>Direct</option>
+          <option value="reflective" ${u.comm_style==='reflective'?'selected':''}>Reflective</option>
+        </select>
+      </div>
+      <div class="srow">
+        <span class="srow-lbl">Timezone</span>
+        <span class="srow-val">${esc(u.timezone||'Not set')}</span>
+      </div>
+      <div class="srow">
+        <span class="srow-lbl">Onboarding</span>
+        <span class="srow-val">${u.onboarding_done ? '✓ Complete' : 'Pending'}</span>
+      </div>
+
+      <div class="sec-head">App</div>
+      <div class="srow">
+        <span class="srow-lbl">Backend URL</span>
+        <span class="srow-val" style="font-size:11px;font-family:monospace;max-width:170px;overflow:hidden;text-overflow:ellipsis">${esc(S.cfg.url)}</span>
+      </div>
+      <div class="srow danger" onclick="doLogout()">
+        <span class="srow-lbl">Sign out</span>
+        <span style="color:var(--txt3);font-size:16px">→</span>
+      </div>
+    </div>${bnavHTML()}`;
+}
+
+// ─── RENDER ───────────────────────────────────────────────────────────────────
+function render() {
+  const root = document.getElementById('root');
+  const fn = screens[S.screen];
+  root.innerHTML = fn ? fn() : '';
+  if ((S.screen === 'main' && S.nav === 'chat') || S.screen === 'onboarding') scrollChat();
+}
+
+// ─── EVENT HANDLERS (exposed to HTML) ────────────────────────────────────────
+function onSetup() {
+  const url = ($('cfg-url')?.value||'').trim();
+  if (!url) { S.error = 'Enter your backend URL.'; render(); return; }
+  try { new URL(url); } catch(e) { S.error = 'Enter a valid URL including https://'; render(); return; }
+  S.cfg.url = url; S.error = null; save(); go('login');
+}
+
+function onLogin() {
+  const email = ($('le')?.value||'').trim();
+  const pwd = $('lp')?.value||'';
+  if (!email || !pwd) { S.error = 'Enter your email and password.'; render(); return; }
+  doLogin(email, pwd);
+}
+
+function onRegister() {
+  const name = ($('rn')?.value||'').trim();
+  const email = ($('re')?.value||'').trim();
+  const pwd = $('rp')?.value||'';
+  if (!name || !email || !pwd) { S.error = 'Fill in all fields.'; render(); return; }
+  if (pwd.length < 8) { S.error = 'Password must be at least 8 characters.'; render(); return; }
+  doRegister(name, email, pwd);
+}
+
+function onSend() {
+  const ta = $('ci');
+  const content = ta?.value?.trim();
+  if (!content) return;
+  ta.value = ''; ta.style.height = 'auto';
+  doSend(content);
+}
+
+function onKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSend(); }
+}
+
+function autoH(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+}
+
+function backMem() { S.screen = 'main'; S.nav = 'memories'; S.memDetail = null; render(); }
+
+// Expose globals
+Object.assign(window, { go, onSetup, onLogin, onRegister, onSend, onKey, autoH, switchNav, openMemory, backMem, doCloseConv, doLogout, loadMemories, loadTrends, doUpdateProfile });
+
+// ─── BOOT ────────────────────────────────────────────────────────────────────
+async function boot() {
+  load();
+  if (!S.cfg.url) { S.screen = 'setup'; render(); return; }
+  if (S.token) {
+    S.screen = 'loading'; render();
+    await loadUser();
+    if (S.user) { await afterAuth(); return; }
+  }
+  S.screen = 'login'; render();
+}
+
+boot();
+</script>
+</body>
+</html>
