@@ -166,7 +166,11 @@ export async function runInactivityClose(boss: PgBoss): Promise<void> {
 // startJobQueue — call once at startup
 // ─────────────────────────────────────────────────────────────────────────────
 
+
+
 export async function startJobQueue(boss: PgBoss): Promise<void> {
+  await boss.createQueue(JOB_MEMORY_EXTRACTION);   // ADD this line
+  await boss.createQueue(JOB_INACTIVITY_CLOSE);    // ADD this line
   await boss.work<ExtractionJobEnqueuePayload>(
     JOB_MEMORY_EXTRACTION,
     { batchSize: 5 },
