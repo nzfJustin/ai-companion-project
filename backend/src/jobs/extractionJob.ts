@@ -92,11 +92,16 @@ export async function runExtractionJob(
     });
 
     decryptedMessages = rawMessages
-      .reverse() // oldest first
-      .map((m) => ({
-        role:    m.role as 'user' | 'assistant',
-        content: enc.decrypt(m.content, m.contentIv),
-      }));
+    .reverse() // oldest first
+    .map((m) => ({
+      role:    m.role as 'user' | 'assistant',
+      content: enc.decrypt(m.content, m.contentIv),
+    }));
+
+  // Anthropic requires the last message to be from the user
+  while (decryptedMessages.length > 0 && decryptedMessages[decryptedMessages.length - 1].role === 'assistant') {
+    decryptedMessages.pop();
+  }
   } catch (err) {
     logError({
       event:           'extraction_job_fetch_failed',
