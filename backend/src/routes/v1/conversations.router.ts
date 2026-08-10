@@ -47,7 +47,7 @@ import { LLMTimeoutError } from '../../ai/llm/errors';
 import type { Message }      from '../../ai/llm/types';
 import { warn }              from '../../lib/logger';
 import { enqueueExtractionJob } from '../../jobs';
-import type { PgBoss } from 'pg-boss';
+import type PgBoss from 'pg-boss';
 import { stripCrisisSentinel, sentinelPrefixOverlapLength } from './messagesStream';
 
 // ─── Router + global middleware ────────────────────────────────────────────────

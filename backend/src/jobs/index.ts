@@ -11,7 +11,8 @@
  *                        closes them automatically (P1-15 criterion 4)
  */
 
-import type { PgBoss, Job } from 'pg-boss';
+import type PgBoss from 'pg-boss';
+import type { Job } from 'pg-boss';
 import { sql, eq, and } from 'drizzle-orm';
 import { db }                   from '../db';
 import { conversations, userContext } from '../db/schema';
