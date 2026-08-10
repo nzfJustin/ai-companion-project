@@ -256,10 +256,43 @@ export function selectPrompt(
   ctx:  PromptContext,
   mode: 'chat' | 'extraction' | 'onboarding' = 'chat',
 ): VersionedPrompt {
-  if (mode === 'extraction') return ONBOARDING_EXTRACTION_PROMPT;
+  if (mode === 'extraction') return MEMORY_EXTRACTION_PROMPT;
   if (mode === 'onboarding') return ONBOARDING_PROMPT;
   return ctx.onboarding_done ? CHAT_PROMPT : ONBOARDING_PROMPT;
 }
+
+// ─── Memory extraction prompt ─────────────────────────────────────────────────
+
+const MEMORY_EXTRACTION_SYSTEM = `\
+You are a memory extraction system. Analyze the conversation and return ONLY valid JSON with no other text, code fences, or explanation.
+
+Required JSON structure:
+{
+  "title": "Short descriptive title for this conversation (max 200 chars)",
+  "summary": "A warm, personal paragraph summarising what was discussed (max 5000 chars)",
+  "key_events": ["Up to 10 short strings describing key moments or topics"],
+  "dominant_emotion": "Single word — the most prominent emotion in the conversation",
+  "emotion_scores": {
+    "joy": 0.0,
+    "sadness": 0.0,
+    "anxiety": 0.0,
+    "anger": 0.0,
+    "calm": 0.0,
+    "excitement": 0.0
+  },
+  "memory_level": 1
+}
+
+Rules:
+- emotion_scores values must be floats between 0.0 and 1.0 and sum to approximately 1.0
+- memory_level must be an integer 1-5 (1=general, 5=highly sensitive)
+- dominant_emotion must be a single lowercase word with no punctuation
+- Return ONLY the JSON object, nothing else`;
+
+export const MEMORY_EXTRACTION_PROMPT: VersionedPrompt = {
+  version: 'memory_extraction_v1.0.0',
+  system:  (_ctx: PromptContext) => MEMORY_EXTRACTION_SYSTEM,
+};
 
 // ─── Onboarding extraction prompt ────────────────────────────────────────────
 // Used by OnboardingService after the first conversation closes. Instructs
