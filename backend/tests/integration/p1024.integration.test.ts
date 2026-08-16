@@ -42,7 +42,7 @@ import request  from 'supertest';
 // exercises the real conversation-close → enqueue call path end-to-end;
 // it just verifies the call arguments (below) instead of a real row landing
 // in pgboss.job.
-import type { PgBoss } from 'pg-boss';
+import type PgBoss from 'pg-boss';
 import { eq, and } from 'drizzle-orm';
 import { app }  from '../../src/app';
 import { db }   from '../../src/db';
@@ -54,10 +54,16 @@ import {
   memories,
   userMemoryPins,
 } from '../../src/db/schema';
-import { setJobQueue, setOrchestrator } from '../../src/routes/v1/conversations.router';
+import { setJobQueue } from '../../src/routes/v1/conversations.router';
+// setOrchestrator moved from conversations.router.ts to ai/instance.ts as
+// part of the onboarding-transition refactor (messagesStream.ts now imports
+// the aiOrchestrationService singleton directly rather than conversations.router.ts
+// passing it in) — see ai/instance.ts for why it's a settable proxy.
+import { setOrchestrator } from '../../src/ai/instance';
 import { JOB_MEMORY_EXTRACTION } from '../../src/jobs';
 import { EncryptionService } from '../../src/services/EncryptionService';
 import { AIOrchestrationService } from '../../src/ai/AIOrchestrationService';
+import { ONBOARDING_COMPLETE_SENTINEL } from '../../src/ai/prompts';
 import { MockLLMProvider } from '../mocks/MockLLMProvider';
 
 
@@ -537,5 +543,141 @@ describe('Flow 3 — Memory Access Control (Level 4)', () => {
     // Level 2 should be accessible without elevated token
     expect(res.status).toBe(200);
     expect(res.body.summary).toBe('A normal level-2 memory.');
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Flow 4 — Onboarding 3-minute Transition
+//
+// onboarding conversation → threshold elapsed (ONBOARDING_TRANSITION_MS_OVERRIDE=0
+// forces the offer on every message, no need to wait 3 real minutes) →
+// MockLLMProvider fixture confirms the transition → ONBOARDING_COMPLETE sentinel
+// detected → conversation closed server-side → extraction job enqueued →
+// SSE done payload carries onboarding_complete: true.
+// ═════════════════════════════════════════════════════════════════════════════
+
+describe('Flow 4 — Onboarding 3-minute Transition', () => {
+  const EMAIL = `onboarding-transition-${Date.now()}@test.invalid`;
+  let accessToken:    string;
+  let conversationId: string;
+
+  // A dedicated MockLLMProvider (not the one Flow 2 injected) so this flow
+  // can control the exact response per test — setFixture('chat', ...) below
+  // switches between "confirms the transition" (includes the sentinel) and
+  // "declines" (doesn't) per test, which a shared fixture couldn't do.
+  const mockLLMProvider = new MockLLMProvider();
+
+  beforeAll(async () => {
+    // Force the transition-offer threshold to 0ms so it's injected on the
+    // very first message instead of requiring 3 real minutes of elapsed time.
+    process.env.ONBOARDING_TRANSITION_MS_OVERRIDE = '0';
+    setOrchestrator(new AIOrchestrationService(mockLLMProvider));
+
+    const reg   = await register(EMAIL);
+    const logIn = await login(EMAIL);
+    accessToken = logIn.accessToken;
+
+    // New users default to onboarding_done: false already, but set it
+    // explicitly so this test doesn't depend on that default staying true.
+    await db.update(users).set({ onboardingDone: false }).where(eq(users.email, EMAIL));
+  });
+
+  afterAll(async () => {
+    delete process.env.ONBOARDING_TRANSITION_MS_OVERRIDE;
+    // Restore the shared MockLLMProvider so no later test file (or a re-run
+    // within this file) inherits Flow 4's fixtures.
+    setOrchestrator(new AIOrchestrationService(new MockLLMProvider()));
+  });
+
+  it('4.1 — creates an onboarding conversation', async () => {
+    const res = await request(app)
+      .post('/v1/conversations')
+      .set('Authorization', `Bearer ${accessToken}`);
+
+    expect(res.status).toBe(201);
+    expect(res.body.status).toBe('active');
+    conversationId = res.body.id;
+  });
+
+  it('4.2 — SSE done event includes onboarding_complete: true when the user confirms', async () => {
+    // MockLLMProvider.detectType() routes by loosely scanning the system
+    // prompt for keywords — and ONBOARDING_COMPLETE_SENTINEL itself contains
+    // the substring "onboard", so a prompt carrying the transition block
+    // always matches its 'onboarding' bucket (meant for a completely
+    // different fixture — the onboarding-extraction JSON), never 'chat'.
+    // Set both buckets identically so the response is correct regardless of
+    // which one detectType() picks, without touching that shared heuristic.
+    const confirmingReply = `That's wonderful — let's dive into your main chat!\n${ONBOARDING_COMPLETE_SENTINEL}`;
+    mockLLMProvider.setFixture('chat', confirmingReply);
+    mockLLMProvider.setFixture('onboarding', confirmingReply);
+
+    const res = await request(app)
+      .post(`/v1/conversations/${conversationId}/messages`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .set('Accept', 'text/event-stream')
+      .send({ content: "Yes, let's jump to the main chat!" });
+
+    expect(res.status).toBe(200);
+
+    const body = res.text as string;
+    // The sentinel must never reach the client, in any frame.
+    expect(body).not.toContain(ONBOARDING_COMPLETE_SENTINEL);
+
+    const doneMatch = body.match(/event: done\ndata: ({.*})/);
+    expect(doneMatch).not.toBeNull();
+    const doneMeta = JSON.parse(doneMatch![1]);
+    expect(doneMeta.onboarding_complete).toBe(true);
+  });
+
+  it('4.3 — conversation is closed server-side after the transition sentinel is detected', async () => {
+    // driveOrchestrationStream's close/enqueue happens after finishDone —
+    // give it a moment to complete against the real DB.
+    await new Promise((r) => setTimeout(r, 300));
+
+    const [conv] = await db
+      .select({ status: conversations.status, endedAt: conversations.endedAt })
+      .from(conversations)
+      .where(eq(conversations.id, conversationId))
+      .limit(1);
+
+    expect(conv?.status).toBe('closed');
+    expect(conv?.endedAt).not.toBeNull();
+  });
+
+  it('4.4 — a memory_extraction job is enqueued after the transition close', async () => {
+    expect(mockSend).toHaveBeenCalledWith(
+      JOB_MEMORY_EXTRACTION,
+      expect.objectContaining({ conversation_id: conversationId }),
+      expect.anything(),
+    );
+  });
+
+  it('4.4N — (negative) a sentinel-free response leaves the conversation active', async () => {
+    // See the note in 4.2 — the transition block is present here too (same
+    // threshold override), so both fixture buckets need to agree.
+    const decliningReply = 'Sure, let\'s keep chatting here a little longer.';
+    mockLLMProvider.setFixture('chat', decliningReply);
+    mockLLMProvider.setFixture('onboarding', decliningReply);
+
+    const convRes = await request(app)
+      .post('/v1/conversations')
+      .set('Authorization', `Bearer ${accessToken}`);
+    const convId2 = convRes.body.id;
+
+    const msgRes = await request(app)
+      .post(`/v1/conversations/${convId2}/messages`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .set('Accept', 'text/event-stream')
+      .send({ content: 'No, I want to keep chatting here.' });
+
+    expect(msgRes.text).not.toContain('onboarding_complete');
+
+    const [conv] = await db
+      .select({ status: conversations.status })
+      .from(conversations)
+      .where(eq(conversations.id, convId2))
+      .limit(1);
+
+    expect(conv?.status).toBe('active');
   });
 });

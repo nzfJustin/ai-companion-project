@@ -489,4 +489,49 @@ describe('F1-006 — SSE streaming in ConversationView', () => {
     const bubbles = screen.getAllByText('A message');
     expect(bubbles.length).toBeGreaterThanOrEqual(1); // bubble + possibly restored draft
   });
+
+  it('navigates to /chat ~1.5s after event:done includes onboarding_complete: true', async () => {
+    const frames = [
+      `id: 1\nevent: token\ndata: {"delta":"Great chatting with you!"}\n\n`,
+      `event: done\ndata: {"message_id":"msg-1","emotion_tags":{"primary":"calm","score":0.8},"onboarding_complete":true}\n\n`,
+    ];
+    vi.stubGlobal('fetch', makeFetchMock(makeSseStream(frames)));
+    vi.mocked(listConversations).mockResolvedValue(LIST_RESP);
+    const user = userEvent.setup();
+
+    const textarea = await renderAndLoad();
+    await user.type(textarea, "Yes, let's jump in!");
+    await user.keyboard('{Enter}');
+
+    // The farewell message renders first — navigation is intentionally delayed.
+    await waitFor(() =>
+      expect(screen.getByText('Great chatting with you!')).toBeInTheDocument(),
+    );
+    expect(screen.queryByRole('button', { name: /new conversation/i })).not.toBeInTheDocument();
+
+    // After the delay, the view has switched to the conversation list (/chat).
+    await waitFor(
+      () => expect(screen.getByRole('button', { name: /new conversation/i })).toBeInTheDocument(),
+      { timeout: 3000 },
+    );
+  });
+
+  it('does NOT navigate away when event:done omits onboarding_complete', async () => {
+    vi.stubGlobal('fetch', makeFetchMock(makeTokenStream(['Just an ordinary reply.'])));
+    const user = userEvent.setup();
+
+    const textarea = await renderAndLoad();
+    await user.type(textarea, 'A regular message');
+    await user.keyboard('{Enter}');
+
+    await waitFor(() =>
+      expect(screen.getByText('Just an ordinary reply.')).toBeInTheDocument(),
+    );
+
+    // Give the (nonexistent) navigation timer a chance to fire, then confirm
+    // the conversation view is still showing — no navigation occurred.
+    await new Promise((r) => setTimeout(r, 1700));
+    expect(screen.getByText('Just an ordinary reply.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /new conversation/i })).not.toBeInTheDocument();
+  });
 });
