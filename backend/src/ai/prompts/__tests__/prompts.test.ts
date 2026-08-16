@@ -199,8 +199,8 @@ describe('CHAT_PROMPT', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('ONBOARDING_PROMPT', () => {
-  it('has version string "onboarding_v1.0.0"', () => {
-    expect(ONBOARDING_PROMPT.version).toBe('onboarding_v1.0.0');
+  it('has version string "onboarding_v1.1.0"', () => {
+    expect(ONBOARDING_PROMPT.version).toBe('onboarding_v1.1.0');
   });
 
   it('returns a non-empty string', () => {
@@ -242,7 +242,7 @@ describe('selectPrompt', () => {
 
   it('returns ONBOARDING_PROMPT when onboarding_done = false', () => {
     const prompt = selectPrompt({ ...BASE_CTX, onboarding_done: false });
-    expect(prompt.version).toBe('onboarding_v1.0.0');
+    expect(prompt.version).toBe('onboarding_v1.1.0');
   });
 
   it('returns a VersionedPrompt with a version string and system function', () => {

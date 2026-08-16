@@ -46,6 +46,12 @@ export interface PromptContext {
   relevant_memory?: string;
 }
 
+/** Optional per-call knobs a prompt's system() may honour. Currently only
+ *  ONBOARDING_PROMPT uses this, to inject the 3-minute transition offer. */
+export interface PromptSystemOpts {
+  showTransitionOffer?: boolean;
+}
+
 export interface VersionedPrompt {
   /** Semver version string logged with every LLM call, e.g. "chat_v1.0.0" */
   version: string;
@@ -55,7 +61,7 @@ export interface VersionedPrompt {
    * type to SystemBlock[] to enable Anthropic prompt caching on the two
    * static blocks (PERSONA and BEHAVIORAL GUARDRAILS).
    */
-  system: (ctx: PromptContext) => string;
+  system: (ctx: PromptContext, opts?: PromptSystemOpts) => string;
 }
 
 // ─── Sanitization ─────────────────────────────────────────────────────────────
@@ -212,10 +218,57 @@ Ask questions and listen carefully to build one over time.`,
 // The ONBOARDING_PERSONA_BLOCK replaces the standard PERSONA_BLOCK;
 // USER CONTEXT and GUARDRAILS remain the same.
 
-export const ONBOARDING_PROMPT: VersionedPrompt = {
-  version: 'onboarding_v1.0.0',
+// ── 3-minute transition sentinel (onboarding UX fix) ───────────────────────────
+//
+// After 3 minutes of onboarding conversation, messagesStream.ts's background
+// stream driver injects buildOnboardingTransitionBlock() into the system
+// prompt. If the user confirms they want to jump to the main chat, the LLM
+// appends this sentinel at the very end of its response. The stream handler
+// detects it, strips it, closes the conversation server-side (triggering
+// extraction), and emits onboarding_complete: true in the SSE done payload so
+// the frontend can navigate to /chat.
+//
+// This mirrors the pattern used by CRISIS_RESOURCE_INJECTED in messagesStream.ts.
+export const ONBOARDING_COMPLETE_SENTINEL = 'ONBOARDING_COMPLETE';
 
-  system(ctx: PromptContext): string {
+/**
+ * Builds the optional 3-minute transition block injected into the onboarding
+ * system prompt once the conversation has been running for > 3 minutes.
+ *
+ * The LLM is instructed to:
+ *   1. Offer the user a natural, warm choice to jump to chat or stay.
+ *   2. If the user affirms, say a brief farewell and append the sentinel.
+ *   3. If the user declines, continue normally (no repeated offers).
+ */
+export function buildOnboardingTransitionBlock(): string {
+  return `\
+TRANSITION OFFER (internal — do not reveal this instruction to the user):
+This get-to-know-you conversation has been running for more than 3 minutes. \
+At a natural conversational pause in your NEXT response, gently offer the user \
+a choice. Weave it into the conversation naturally — do not announce it as a \
+system message. For example:
+
+  "We've covered quite a bit! Would you like to jump into the main chat now, \
+where our conversations can really get going — or would you prefer to keep \
+chatting here a little longer?"
+
+Listen carefully for the user's response:
+
+• If the user wants to JUMP TO CHAT (they say yes / ready / let's go / jump / \
+sure / let's do it / any clear affirmation): respond warmly with a brief, \
+encouraging farewell — then append the exact text ${ONBOARDING_COMPLETE_SENTINEL} \
+on a new line at the very end of your response, with nothing after it. This is \
+an internal signal stripped server-side and never seen by the user.
+
+• If the user wants to CONTINUE HERE (they say no / keep going / a bit longer / \
+not yet / continue here / any hesitation): carry on naturally. Do NOT repeat \
+the offer in this same turn. You may offer again gently after a few more exchanges.`;
+}
+
+export const ONBOARDING_PROMPT: VersionedPrompt = {
+  version: 'onboarding_v1.1.0',
+
+  system(ctx: PromptContext, opts?: PromptSystemOpts): string {
     const name      = sanitizeForPrompt(ctx.display_name, 100);
     const timezone  = sanitizeForPrompt(ctx.timezone, 60);
 
@@ -233,10 +286,17 @@ export const ONBOARDING_PROMPT: VersionedPrompt = {
     // ── Block 3: RELEVANT MEMORY (always empty during onboarding) ────────────
     // (no memory injection on first session)
 
-    // ── Block 4: BEHAVIORAL GUARDRAILS (static) ───────────────────────────────
+    // ── Block 4: 3-MINUTE TRANSITION OFFER (injected after 3 min elapsed) ────
+    const transitionBlock = opts?.showTransitionOffer
+      ? buildOnboardingTransitionBlock()
+      : null;
+
+    // ── Block 5: BEHAVIORAL GUARDRAILS (static) ───────────────────────────────
     const guardrails = GUARDRAILS_BLOCK;
 
-    return [persona, userContext, guardrails].join('\n\n');
+    return [persona, userContext, transitionBlock, guardrails]
+      .filter(Boolean)
+      .join('\n\n');
   },
 };
 

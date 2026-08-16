@@ -50,7 +50,7 @@ import { generateKeyPairSync } from 'node:crypto';
 import request                  from 'supertest';
 import { app }                  from '../../app';
 import { signAccessToken }      from '../../lib/jwt';
-import { setOrchestrator }      from '../v1/conversations.router';
+import { setOrchestrator }      from '../../ai/instance';
 import type { AIOrchestrationService } from '../../ai/AIOrchestrationService';
 import { LLMTimeoutError, LLMStreamError } from '../../ai/llm/errors';
 import { CRISIS_SENTINEL }      from '../v1/messagesStream';
@@ -347,14 +347,17 @@ describe('POST /:id/messages — SSE stream', () => {
   });
 
   it('token frames include sequential id fields for reconnection', async () => {
+    // StreamSession token IDs are 1-indexed (see streamSessionRegistry.ts) —
+    // 0 is reserved to mean "Last-Event-ID: none seen yet" on reconnect, so
+    // it can never collide with a real token's id.
     makeStreamOrchestrator(['A', 'B', 'C']);
     const res = await collectSSE(`/v1/conversations/${CONV_ID}/messages`, { content: 'hello' });
     const frames = parseSSEFrames(res.body as string);
 
     const tokens = frames.filter((f) => f.event === 'token');
-    expect(tokens[0].id).toBe('0');
-    expect(tokens[1].id).toBe('1');
-    expect(tokens[2].id).toBe('2');
+    expect(tokens[0].id).toBe('1');
+    expect(tokens[1].id).toBe('2');
+    expect(tokens[2].id).toBe('3');
   });
 
   it('emits event:done with message_id and emotion_tags after stream completes', async () => {

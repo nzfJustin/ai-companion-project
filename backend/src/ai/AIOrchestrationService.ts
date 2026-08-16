@@ -33,7 +33,7 @@ import {
   LLMTimeoutError,
   RATE_LIMIT_USER_MESSAGE,
 } from './llm/errors';
-import type { PromptContext } from './prompts/index';
+import type { PromptContext, PromptSystemOpts } from './prompts/index';
 import { selectPrompt }      from './prompts/index';
 import { log, warn } from '../lib/logger';
 
@@ -65,6 +65,12 @@ export interface OrchestrationRequest {
   mode:        'chat' | 'extraction' | 'onboarding';
   messages:    Message[];
   userProfile: UserProfileForOrchestration;
+  /**
+   * Per-call knobs passed through to the selected prompt's system() builder.
+   * Currently only used by ONBOARDING_PROMPT to inject the 3-minute
+   * transition offer (see messagesStream.ts's driveOrchestrationStream).
+   */
+  promptOpts?: PromptSystemOpts;
 }
 
 export interface OrchestrationResponse {
@@ -321,7 +327,7 @@ export class AIOrchestrationService {
     //   'onboarding' → ONBOARDING_PROMPT (always, ignores onboarding_done flag)
     //   'chat'       → CHAT_PROMPT or ONBOARDING_PROMPT based on ctx.onboarding_done
     const prompt = selectPrompt(ctx, req.mode);
-    const system = prompt.system(ctx);
+    const system = prompt.system(ctx, req.promptOpts);
 
     return { prompt, system };
   }

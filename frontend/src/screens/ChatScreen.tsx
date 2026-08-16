@@ -28,10 +28,16 @@
  *   ✓ Network drop (fetch abort) → same error recovery path as event:error.
  *   ✓ User's message is never lost — it was persisted by the backend before
  *     the stream began.
+ *
+ * Onboarding transition:
+ *   ✓ event:done with onboarding_complete: true (server closed the onboarding
+ *     conversation after the user confirmed "jump to chat") → navigate to
+ *     /chat after a short delay, so the user has a moment to read the
+ *     farewell message before the view changes.
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { MessageBubble }   from '../components/MessageBubble';
 import { MessageSkeleton } from '../components/MessageSkeleton';
@@ -69,6 +75,8 @@ interface StreamBubble {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function ConversationView({ conversationId }: { conversationId: string }) {
+  const navigate = useNavigate();
+
   // ── State ────────────────────────────────────────────────────────────────────
   const [draft,        setDraft]        = useState('');
   const [messages,     setMessages]     = useState<MessageResponse[]>([]);
@@ -191,8 +199,9 @@ function ConversationView({ conversationId }: { conversationId: string }) {
 
         } else if (frame.event === 'done') {
           const done = JSON.parse(frame.data) as {
-            message_id:   string;
-            emotion_tags: { primary: string; score: number };
+            message_id:          string;
+            emotion_tags:        { primary: string; score: number };
+            onboarding_complete?: boolean;
           };
           // Move the completed message into the persistent list
           setMessages((prev) => [
@@ -206,6 +215,16 @@ function ConversationView({ conversationId }: { conversationId: string }) {
             },
           ]);
           setStreamBubble(null);
+
+          // ── Onboarding transition ────────────────────────────────────────────
+          // The server closed the onboarding conversation and enqueued
+          // extraction. Give the user a moment to read the farewell message,
+          // then navigate to the main chat so they can start a fresh
+          // conversation.
+          if (done.onboarding_complete) {
+            setTimeout(() => navigate('/chat', { replace: true }), 1500);
+          }
+
           return; // success — finally still runs
 
         } else if (frame.event === 'error') {
@@ -230,7 +249,7 @@ function ConversationView({ conversationId }: { conversationId: string }) {
     } finally {
       setIsStreaming(false);
     }
-  }, [draft, isStreaming, conv, conversationId]);
+  }, [draft, isStreaming, conv, conversationId, navigate]);
 
   // ── Render ────────────────────────────────────────────────────────────────
 

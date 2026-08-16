@@ -31,7 +31,7 @@ jest.mock('../index', () => {
 
 // ── Imports ────────────────────────────────────────────────────────────────────
 
-import type { PgBoss } from 'pg-boss';
+import type PgBoss from 'pg-boss';
 import { runInactivityClose, INACTIVITY_THRESHOLD_MS } from '../index';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
