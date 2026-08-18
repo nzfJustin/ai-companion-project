@@ -167,8 +167,9 @@ async function doLogin(email, pwd) {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password: pwd }), credentials: 'include',
     });
-    const d = await res.json();
-    if (!res.ok) { S.error = codeMsg(d); S.loading = false; render(); return; }
+    let d = {};
+    try { d = await res.json(); } catch(e) {}
+    if (!res.ok) { S.error = codeMsg(d) || 'Login failed — please try again.'; S.loading = false; render(); return; }
     S.token = d.access_token || d.token; save();
     await loadUser(); S.loading = false; await afterAuth();
   } catch(e) { S.error = e.message; S.loading = false; render(); }
@@ -181,8 +182,9 @@ async function doRegister(name, email, pwd) {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ display_name: name, email, password: pwd }), credentials: 'include',
     });
-    const d = await res.json();
-    if (!res.ok) { S.error = codeMsg(d); S.loading = false; render(); return; }
+    let d = {};
+    try { d = await res.json(); } catch(e) {}
+    if (!res.ok) { S.error = codeMsg(d) || 'Registration failed — please try again.'; S.loading = false; render(); return; }
     await doLogin(email, pwd);
   } catch(e) { S.error = e.message; S.loading = false; render(); }
 }
