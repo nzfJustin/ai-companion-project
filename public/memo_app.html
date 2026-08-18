@@ -189,7 +189,7 @@ async function doRegister(name, email, pwd) {
 
 async function afterAuth() {
   if (!S.user) { S.screen = 'login'; render(); return; }
-  if (!S.user.onboarding_done) { S.screen = 'onboarding'; await loadOrCreateConv(); render(); }
+  if (!S.user.onboarding_done) { S.screen = 'onboarding'; await loadOrCreateConv(); render(); startOnboardingPoll(); }
   else { S.screen = 'main'; S.nav = 'chat'; await loadOrCreateConv(); render(); }
 }
 
@@ -293,12 +293,27 @@ async function doSend(content) {
 async function checkOnboarding() {
   await loadUser();
   if (S.user && S.user.onboarding_done) {
+    stopOnboardingPoll();
     showToast('Onboarding complete! Taking you to the app...');
     setTimeout(async () => {
+      S.convId = null;
       S.screen = 'main'; S.nav = 'chat';
       await loadOrCreateConv(); render();
     }, 1200);
   }
+}
+
+// Background poll every 20s during onboarding for server-side completion
+var _onboardingPollTimer = null;
+function startOnboardingPoll() {
+  stopOnboardingPoll();
+  _onboardingPollTimer = setInterval(async () => {
+    if (S.screen !== 'onboarding') { stopOnboardingPoll(); return; }
+    await checkOnboarding();
+  }, 20000);
+}
+function stopOnboardingPoll() {
+  if (_onboardingPollTimer) { clearInterval(_onboardingPollTimer); _onboardingPollTimer = null; }
 }
 
 function appendMsg(id, delta) {
@@ -554,7 +569,7 @@ function onKey(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); 
 function autoH(el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 120) + 'px'; }
 function backMem() { S.screen = 'main'; S.nav = 'memories'; S.memDetail = null; render(); }
 
-Object.assign(window, { go, onSetup, onLogin, onRegister, onSend, onKey, autoH, switchNav, openMemory, backMem, doCloseConv, doLogout, loadMemories, loadTrends, doUpdateProfile });
+Object.assign(window, { go, onSetup, onLogin, onRegister, onSend, onKey, autoH, switchNav, openMemory, backMem, doCloseConv, doLogout, loadMemories, loadTrends, doUpdateProfile, startOnboardingPoll, stopOnboardingPoll });
 
 async function boot() {
   load();
