@@ -277,7 +277,17 @@ async function doSend(content) {
             else if (evType === 'done') {
               patchMsg(aid, { typing: false, emotion: data.emotion_tags });
               S.streaming = false;
-              if (S.screen === 'onboarding') checkOnboarding();
+              if (S.screen === 'onboarding') {
+                if (data.onboardingComplete) {
+                  // Backend confirmed sentinel — transition immediately
+                  stopOnboardingPoll();
+                  S.convId = null;
+                  showToast('Onboarding complete! Taking you to the app...');
+                  setTimeout(async () => { S.screen = 'main'; S.nav = 'chat'; await loadOrCreateConv(); render(); }, 1000);
+                } else {
+                  checkOnboarding();
+                }
+              }
             } else if (evType === 'error') {
               const txt = data.code === 'LLM_TIMEOUT' ? "I'm having a quiet moment — could you share that again?" : 'Something went wrong.';
               patchMsg(aid, { content: txt, typing: false }); S.streaming = false;
