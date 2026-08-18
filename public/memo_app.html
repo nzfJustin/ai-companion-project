@@ -106,6 +106,13 @@ select.inline { background: var(--s2); border: 1px solid var(--bdr2); border-rad
 .spin { width: 28px; height: 28px; border: 2px solid var(--bdr2); border-top-color: var(--acc); border-radius: 50%; animation: spin .6s linear infinite; margin: 40px auto; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .avatar { width: 46px; height: 46px; border-radius: 50%; background: var(--acc-s); border: 1px solid var(--acc-b); display: flex; align-items: center; justify-content: center; font-size: 19px; font-weight: 600; color: var(--acc); flex-shrink: 0; }
+/* Toast */
+.toast { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); background: var(--s3); border: 1px solid var(--bdr2); border-radius: 10px; padding: 10px 18px; font-size: 13px; color: var(--txt); z-index: 100; white-space: nowrap; animation: fadeup .3s ease; }
+@keyframes fadeup { from { opacity:0; transform: translateX(-50%) translateY(10px); } to { opacity:1; transform: translateX(-50%) translateY(0); } }
+/* Session ended banner */
+.session-banner { background: var(--acc-s); border: 1px solid var(--acc-b); border-radius: 10px; padding: 14px 16px; margin: 14px 16px; text-align: center; }
+.session-banner-t { font-size: 14px; font-weight: 600; color: var(--acc); margin-bottom: 4px; }
+.session-banner-s { font-size: 12px; color: var(--txt3); margin-bottom: 10px; }
 </style>
 </head>
 <body>
@@ -116,8 +123,10 @@ const $ = id => document.getElementById(id);
 const S = {
   screen: 'loading', token: null, user: null, convId: null, msgs: [],
   memories: [], memDetail: null, trends: [], streak: null,
-  streaming: false, error: null, loading: false, nav: 'chat', cfg: { url: '' },
+  streaming: false, error: null, loading: false, nav: 'chat',
+  cfg: { url: '' }, sessionJustEnded: false,
 };
+
 function load() {
   try { const d = JSON.parse(localStorage.getItem('memo_v1') || '{}'); S.cfg.url = d.url || ''; S.token = d.token || null; } catch(e) {}
 }
@@ -125,13 +134,14 @@ function save() {
   try { localStorage.setItem('memo_v1', JSON.stringify({ url: S.cfg.url, token: S.token })); } catch(e) {}
 }
 const base = () => S.cfg.url.replace(/\/$/, '');
+
 async function api(method, path, body, _retry = true) {
   const headers = { 'Content-Type': 'application/json' };
   if (S.token) headers['Authorization'] = 'Bearer ' + S.token;
   let res;
   try {
     res = await fetch(base() + path, { method, headers, body: body ? JSON.stringify(body) : undefined, credentials: 'include' });
-  } catch(e) { throw new Error('Cannot reach backend. Check your URL and CORS config.'); }
+  } catch(e) { throw new Error('Cannot reach backend.'); }
   if (res.status === 401 && _retry) {
     const ok = await tryRefresh();
     if (ok) return api(method, path, body, false);
@@ -139,6 +149,7 @@ async function api(method, path, body, _retry = true) {
   }
   return res;
 }
+
 async function tryRefresh() {
   try {
     const res = await fetch(base() + '/v1/auth/refresh', { method: 'POST', credentials: 'include' });
@@ -148,6 +159,7 @@ async function tryRefresh() {
   } catch(e) {}
   return false;
 }
+
 async function doLogin(email, pwd) {
   S.loading = true; S.error = null; render();
   try {
@@ -161,6 +173,7 @@ async function doLogin(email, pwd) {
     await loadUser(); S.loading = false; await afterAuth();
   } catch(e) { S.error = e.message; S.loading = false; render(); }
 }
+
 async function doRegister(name, email, pwd) {
   S.loading = true; S.error = null; render();
   try {
@@ -173,29 +186,46 @@ async function doRegister(name, email, pwd) {
     await doLogin(email, pwd);
   } catch(e) { S.error = e.message; S.loading = false; render(); }
 }
+
 async function afterAuth() {
   if (!S.user) { S.screen = 'login'; render(); return; }
-  if (!S.user.onboarding_done) { S.screen = 'onboarding'; await startConversation(); render(); }
+  if (!S.user.onboarding_done) { S.screen = 'onboarding'; await loadOrCreateConv(); render(); }
   else { S.screen = 'main'; S.nav = 'chat'; await loadOrCreateConv(); render(); }
 }
+
 async function loadUser() {
   try { const res = await api('GET', '/v1/users/me', null, false); if (res && res.ok) S.user = await res.json(); } catch(e) {}
 }
+
 async function loadOrCreateConv() {
+  // Step 1: try to find an existing active conversation
   try {
-    const res = await api('GET', '/v1/conversations?per_page=5');
+    const res = await api('GET', '/v1/conversations?per_page=10');
     if (res && res.ok) {
       const d = await res.json();
       const convs = d.conversations || d.data || (Array.isArray(d) ? d : []);
       const active = convs.find(c => c.status === 'active');
-      if (active) { S.convId = active.id; return; }
+      if (active) { S.convId = active.id; S.msgs = []; return; }
     }
   } catch(e) {}
-  await startConversation();
+
+  // Step 2: try to create a new one
+  try {
+    const res = await api('POST', '/v1/conversations', {});
+    if (res && res.ok) { const d = await res.json(); S.convId = d.id; S.msgs = []; return; }
+    // Step 3: if 409 (one already exists), fetch again and take whatever is there
+    if (res && res.status === 409) {
+      const res2 = await api('GET', '/v1/conversations?per_page=10');
+      if (res2 && res2.ok) {
+        const d = await res2.json();
+        const convs = d.conversations || d.data || (Array.isArray(d) ? d : []);
+        // Take the most recent one regardless of status
+        if (convs.length > 0) { S.convId = convs[0].id; S.msgs = []; return; }
+      }
+    }
+  } catch(e) {}
 }
-async function startConversation() {
-  try { const res = await api('POST', '/v1/conversations', {}); if (res && res.ok) { const d = await res.json(); S.convId = d.id; S.msgs = []; } } catch(e) {}
-}
+
 async function doSend(content) {
   if (!content.trim() || S.streaming || !S.convId) return;
   S.streaming = true;
@@ -209,11 +239,22 @@ async function doSend(content) {
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + S.token },
       body: JSON.stringify({ content }), credentials: 'include',
     });
+    // Handle 401 with refresh
     if (res.status === 401) {
       S.msgs.pop(); S.msgs.pop(); S.streaming = false;
       const refreshed = await tryRefresh();
       if (refreshed) { doSend(content); return; }
       S.token = null; save(); go('login'); return;
+    }
+    // 409 during onboarding = backend closed the conversation via sentinel
+    if (res.status === 409 && S.screen === 'onboarding') {
+      S.msgs.pop(); S.msgs.pop(); S.streaming = false;
+      S.convId = null;
+      showToast('Onboarding complete! Taking you to the app...');
+      await loadUser();
+      await loadOrCreateConv();
+      setTimeout(() => { S.screen = 'main'; S.nav = 'chat'; render(); }, 1000);
+      return;
     }
     if (!res.ok || !res.body) {
       patchMsg(aid, { content: 'Something went wrong. Try again.', typing: false });
@@ -248,34 +289,64 @@ async function doSend(content) {
     }
   } catch(e) { patchMsg(aid, { content: 'Connection lost. Please try again.', typing: false }); S.streaming = false; }
 }
+
 async function checkOnboarding() {
   await loadUser();
-  if (S.user && S.user.onboarding_done) setTimeout(async () => { S.screen = 'main'; S.nav = 'chat'; await loadOrCreateConv(); render(); }, 1000);
+  if (S.user && S.user.onboarding_done) {
+    showToast('Onboarding complete! Taking you to the app...');
+    setTimeout(async () => {
+      S.screen = 'main'; S.nav = 'chat';
+      await loadOrCreateConv(); render();
+    }, 1200);
+  }
 }
+
 function appendMsg(id, delta) {
   const m = S.msgs.find(m => m.id === id); if (!m) return; m.content += delta;
   const el = $('bbl-' + id); if (el) el.textContent = m.content;
 }
+
 function patchMsg(id, patch) {
   const m = S.msgs.find(m => m.id === id); if (!m) return; Object.assign(m, patch); renderMsgs();
 }
+
 async function doCloseConv() {
   if (!S.convId) return;
-  try { await api('PATCH', '/v1/conversations/' + S.convId, { status: 'closed' }); S.msgs = []; S.convId = null; await startConversation(); render(); } catch(e) {}
+  try {
+    const res = await api('PATCH', '/v1/conversations/' + S.convId, { status: 'closed' });
+    if (res && (res.ok || res.status === 409)) {
+      S.msgs = []; S.convId = null; S.sessionJustEnded = true;
+      S.nav = 'chat';
+      await loadOrCreateConv();
+      render();
+      showToast('Session saved — memory is being generated...');
+    }
+  } catch(e) {}
 }
+
 async function doLogout() {
   try { await api('POST', '/v1/auth/logout'); } catch(e) {}
-  S.token = null; S.user = null; S.msgs = []; S.convId = null; S.memories = []; S.trends = []; S.streak = null;
+  S.token = null; S.user = null; S.msgs = []; S.convId = null;
+  S.memories = []; S.trends = []; S.streak = null; S.sessionJustEnded = false;
   save(); go('login');
 }
+
 async function loadMemories() {
   S.loading = true; render();
-  try { const res = await api('GET', '/v1/memories'); if (res && res.ok) { const d = await res.json(); S.memories = d.memories || d.data || (Array.isArray(d) ? d : []); } } catch(e) {}
+  try {
+    const res = await api('GET', '/v1/memories');
+    if (res && res.ok) { const d = await res.json(); S.memories = d.memories || d.data || (Array.isArray(d) ? d : []); }
+  } catch(e) {}
   S.loading = false; render();
 }
+
 async function openMemory(id) {
-  try { const res = await api('GET', '/v1/memories/' + id); if (res && res.ok) { S.memDetail = await res.json(); S.screen = 'mem_detail'; render(); } } catch(e) {}
+  try {
+    const res = await api('GET', '/v1/memories/' + id);
+    if (res && res.ok) { S.memDetail = await res.json(); S.screen = 'mem_detail'; render(); }
+  } catch(e) {}
 }
+
 async function loadTrends() {
   S.loading = true; render();
   try {
@@ -285,28 +356,46 @@ async function loadTrends() {
   } catch(e) {}
   S.loading = false; render();
 }
+
 async function doUpdateProfile(data) {
-  try { const res = await api('PATCH', '/v1/users/me', data); if (res && res.ok) { S.user = await res.json(); render(); } } catch(e) {}
+  try {
+    const res = await api('PATCH', '/v1/users/me', data);
+    if (res && res.ok) { S.user = await res.json(); showToast('Saved'); render(); }
+  } catch(e) {}
 }
+
 async function switchNav(tab) {
-  S.nav = tab;
-  if (tab === 'memories' && !S.memories.length) await loadMemories();
+  S.nav = tab; S.sessionJustEnded = false;
+  if (tab === 'memories') await loadMemories();
   else if (tab === 'trends' && !S.trends.length) await loadTrends();
   else render();
 }
+
 function go(screen) { S.screen = screen; S.error = null; render(); }
+
+function showToast(msg) {
+  const t = document.createElement('div');
+  t.className = 'toast'; t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 2800);
+}
+
 function esc(s) { return (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function codeMsg(d) {
-  const map = { EMAIL_ALREADY_EXISTS: 'That email is already registered.', INVALID_COMM_STYLE: 'Invalid communication style.', CONVERSATION_CLOSED: 'This conversation is closed.', TOKEN_EXPIRED: 'Session expired.' };
+  const map = { EMAIL_ALREADY_EXISTS: 'That email is already registered.', INVALID_COMM_STYLE: 'Invalid style.', CONVERSATION_CLOSED: 'This conversation is closed.', TOKEN_EXPIRED: 'Session expired.' };
   return map[d && d.error_code] || (d && d.message) || (d && d.error) || 'Something went wrong.';
 }
 function fmtDate(s) { if (!s) return ''; return new Date(s).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }); }
 function scrollChat() { const w = document.querySelector('.chat-body'); if (w) requestAnimationFrame(() => { w.scrollTop = w.scrollHeight; }); }
 function renderMsgs() { const w = document.querySelector('.chat-body'); if (w) { w.innerHTML = msgsHTML(); scrollChat(); } }
+
 function msgsHTML() {
+  if (S.sessionJustEnded) {
+    return '<div class="session-banner"><div class="session-banner-t">Session ended</div><div class="session-banner-s">Your memory is being generated. Check back in Memories in ~60 seconds.</div><button class="btn-p" style="width:auto;padding:10px 20px;font-size:13px" onclick="switchNav(\'memories\')">Go to Memories</button></div>';
+  }
   if (!S.msgs.length) {
     const n = ((S.user && S.user.display_name) || '').split(' ')[0] || 'there';
-    const sub = S.screen === 'onboarding' ? 'Tell me about yourself — your goals, how you\'re feeling, what\'s on your mind.' : 'What\'s on your mind today?';
+    const sub = S.screen === 'onboarding' ? 'Tell me about yourself — your goals, how you\'re feeling.' : 'What\'s on your mind today?';
     return '<div class="empty"><div class="empty-icon">\u2726</div><div class="empty-h">Hey ' + esc(n) + '</div><div class="empty-s">' + sub + '</div></div>';
   }
   return S.msgs.map(function(m) {
@@ -316,21 +405,25 @@ function msgsHTML() {
     return '<div class="msg ' + (isU ? 'u' : 'a') + '"><div class="' + bcls + '" id="bbl-' + m.id + '">' + esc(m.content) + '</div>' + emo + '</div>';
   }).join('');
 }
+
 function chatInput(ph) {
   return '<div class="chat-input-bar"><textarea class="chat-ta" id="ci" placeholder="' + ph + '" rows="1" onkeydown="onKey(event)" oninput="autoH(this)"></textarea><button class="send-btn" onclick="onSend()" ' + (S.streaming ? 'disabled' : '') + '>\u25ba</button></div>';
 }
+
 function bnavHTML() {
   var tabs = [['chat','\uD83D\uDCAC','Chat'],['memories','\uD83E\uDDE0','Memories'],['trends','\uD83D\uDCC8','Trends'],['settings','\u2699\uFE0F','Settings']];
   return '<nav class="bnav">' + tabs.map(function(t) { return '<button class="bnav-btn ' + (S.nav===t[0]?'on':'') + '" onclick="switchNav(\'' + t[0] + '\')"><span class="bnav-icon">' + t[1] + '</span><span>' + t[2] + '</span></button>'; }).join('') + '</nav>';
 }
+
 var EMO_C = { joy:'#FBBF24', calm:'#34D399', sadness:'#60A5FA', anxiety:'#A78BFA', anger:'#F87171', excitement:'#FB923C' };
+
 var screens = {
   loading: function() { return '<div class="screen center"><div class="spin" style="width:34px;height:34px;border-width:3px"></div></div>'; },
   setup: function() {
     return '<div class="screen center"><div style="text-align:center"><div class="logo">me<em>mo</em></div><div class="tagline">Your AI memory companion</div></div><div class="form">' +
       (S.error ? '<div class="err">' + esc(S.error) + '</div>' : '') +
       '<div><label>Backend URL</label><input id="cfg-url" type="url" placeholder="https://your-app.railway.app" value="' + esc(S.cfg.url) + '" /></div>' +
-      '<div style="font-size:12px;color:var(--txt3);line-height:1.6">Enter your Railway backend URL. Saved locally and used for all API calls.</div>' +
+      '<div style="font-size:12px;color:var(--txt3);line-height:1.6">Enter your Railway backend URL.</div>' +
       '<button class="btn-p" onclick="onSetup()">Continue \u2192</button></div></div>';
   },
   login: function() {
@@ -359,9 +452,11 @@ var screens = {
     if (S.nav === 'memories') return mainMemories();
     if (S.nav === 'trends') return mainTrends();
     if (S.nav === 'settings') return mainSettings();
-    return '<div class="topbar"><div class="topbar-t" style="font-size:20px;font-weight:700;letter-spacing:-0.03em">me<span style="color:var(--acc)">mo</span></div>' +
-      '<button class="ico-btn" title="End session" onclick="doCloseConv()">\u2715 End</button></div>' +
-      '<div class="chat-body">' + msgsHTML() + '</div>' + chatInput('What\'s on your mind?') + bnavHTML();
+    var endBtn = S.sessionJustEnded ? '' : '<button class="ico-btn" title="End session" onclick="doCloseConv()">\u2715 End</button>';
+    return '<div class="topbar"><div class="topbar-t" style="font-size:20px;font-weight:700;letter-spacing:-0.03em">me<span style="color:var(--acc)">mo</span></div>' + endBtn + '</div>' +
+      '<div class="chat-body">' + msgsHTML() + '</div>' +
+      (!S.sessionJustEnded ? chatInput('What\'s on your mind?') : '') +
+      bnavHTML();
   },
   mem_detail: function() {
     var m = S.memDetail;
@@ -377,11 +472,12 @@ var screens = {
       '</div>';
   },
 };
+
 function mainMemories() {
   var body;
   if (S.loading) { body = '<div class="spin"></div>'; }
   else if (!S.memories.length) {
-    body = '<div class="empty"><div class="empty-icon">\uD83E\uDDE0</div><div class="empty-h">No memories yet</div><div class="empty-s">Close a conversation to generate your first memory. It may take up to 60 seconds.</div><button class="btn-g" style="margin-top:20px;width:auto;padding:10px 20px" onclick="loadMemories()">Refresh</button></div>';
+    body = '<div class="empty"><div class="empty-icon">\uD83E\uDDE0</div><div class="empty-h">No memories yet</div><div class="empty-s">End a conversation and wait ~60 seconds for your memory to generate.</div><button class="btn-g" style="margin-top:20px;width:auto;padding:10px 20px" onclick="loadMemories()">Refresh</button></div>';
   } else {
     body = '<div class="list-wrap">' + S.memories.map(function(m) {
       return '<div class="mem-card" onclick="openMemory(\'' + esc(m.id) + '\')"><div class="mem-title">' + esc(m.title||'Memory') + '</div><div class="mem-meta"><span class="mem-date">' + fmtDate(m.created_at) + '</span>' + (m.dominant_emotion ? '<span class="emo-badge">' + esc(m.dominant_emotion) + '</span>' : '') + '<span class="lv-badge">L' + (m.level||1) + '</span></div></div>';
@@ -389,6 +485,7 @@ function mainMemories() {
   }
   return '<div class="topbar"><div class="topbar-t">Memories</div><button class="ico-btn" onclick="loadMemories()">\u21BB</button></div><div class="screen">' + body + '</div>' + bnavHTML();
 }
+
 function mainTrends() {
   if (S.loading) return '<div class="topbar"><div class="topbar-t">Trends</div></div><div class="spin"></div>' + bnavHTML();
   var latest = S.trends[S.trends.length - 1];
@@ -403,9 +500,10 @@ function mainTrends() {
     '<div class="trends-wrap"><div class="stat-grid"><div class="stat-card"><div class="stat-big">' + streakN + '</div><div class="stat-lbl">day streak \uD83D\uDD25</div></div>' +
     '<div class="stat-card"><div class="stat-big" style="font-size:22px;margin-top:6px">' + esc(dom) + '</div><div class="stat-lbl">today\'s tone</div></div></div>' +
     (scores ? '<div class="card"><div class="sec-label" style="margin-bottom:14px">Today\'s emotions</div><div class="emo-bars">' + bars + '</div></div>'
-            : '<div class="empty"><div class="empty-icon">\uD83D\uDCC8</div><div class="empty-h">No trend data yet</div><div class="empty-s">Close a conversation first to see emotional patterns.</div></div>') +
+            : '<div class="empty"><div class="empty-icon">\uD83D\uDCC8</div><div class="empty-h">No trend data yet</div><div class="empty-s">End a conversation first to see emotional patterns.</div></div>') +
     '</div>' + bnavHTML();
 }
+
 function mainSettings() {
   var u = S.user || {};
   var init = ((u.display_name || '?')[0] || '?').toUpperCase();
@@ -420,12 +518,14 @@ function mainSettings() {
     '<div class="srow danger" onclick="doLogout()"><span class="srow-lbl">Sign out</span><span style="color:var(--txt3);font-size:16px">\u2192</span></div>' +
     '</div>' + bnavHTML();
 }
+
 function render() {
   var root = document.getElementById('root');
   var fn = screens[S.screen];
   root.innerHTML = fn ? fn() : '';
   if ((S.screen === 'main' && S.nav === 'chat') || S.screen === 'onboarding') scrollChat();
 }
+
 function onSetup() {
   var url = (($('cfg-url') && $('cfg-url').value) || '').trim();
   if (!url) { S.error = 'Enter your backend URL.'; render(); return; }
@@ -453,7 +553,9 @@ function onSend() {
 function onKey(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSend(); } }
 function autoH(el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 120) + 'px'; }
 function backMem() { S.screen = 'main'; S.nav = 'memories'; S.memDetail = null; render(); }
+
 Object.assign(window, { go, onSetup, onLogin, onRegister, onSend, onKey, autoH, switchNav, openMemory, backMem, doCloseConv, doLogout, loadMemories, loadTrends, doUpdateProfile });
+
 async function boot() {
   load();
   if (!S.cfg.url) { S.screen = 'setup'; render(); return; }
