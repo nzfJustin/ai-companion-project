@@ -585,7 +585,10 @@ Object.assign(window, { go, onSetup, onLogin, onRegister, onSend, onKey, autoH, 
 
 async function boot() {
   load();
-  if (!S.cfg.url) { S.screen = 'setup'; render(); return; }
+  if (!S.cfg.url) {
+    S.cfg.url = 'https://ai-companion-project-production.up.railway.app';
+    save();
+  }
   if (S.token) { S.screen = 'loading'; render(); await loadUser(); if (S.user) { await afterAuth(); return; } }
   S.screen = 'login'; render();
 }
