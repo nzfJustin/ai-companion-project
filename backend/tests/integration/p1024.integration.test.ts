@@ -549,7 +549,7 @@ describe('Flow 3 — Memory Access Control (Level 4)', () => {
 // ═════════════════════════════════════════════════════════════════════════════
 // Flow 4 — Onboarding 3-minute Transition
 //
-// onboarding conversation → threshold elapsed (ONBOARDING_TRANSITION_MS_OVERRIDE=0
+// onboarding conversation → threshold elapsed (ONBOARDING_OFFER_MS_OVERRIDE=0
 // forces the offer on every message, no need to wait 3 real minutes) →
 // MockLLMProvider fixture confirms the transition → ONBOARDING_COMPLETE sentinel
 // detected → conversation closed server-side → extraction job enqueued →
@@ -570,7 +570,7 @@ describe('Flow 4 — Onboarding 3-minute Transition', () => {
   beforeAll(async () => {
     // Force the transition-offer threshold to 0ms so it's injected on the
     // very first message instead of requiring 3 real minutes of elapsed time.
-    process.env.ONBOARDING_TRANSITION_MS_OVERRIDE = '0';
+    process.env.ONBOARDING_OFFER_MS_OVERRIDE = '0';
     setOrchestrator(new AIOrchestrationService(mockLLMProvider));
 
     const reg   = await register(EMAIL);
@@ -583,7 +583,7 @@ describe('Flow 4 — Onboarding 3-minute Transition', () => {
   });
 
   afterAll(async () => {
-    delete process.env.ONBOARDING_TRANSITION_MS_OVERRIDE;
+    delete process.env.ONBOARDING_OFFER_MS_OVERRIDE;
     // Restore the shared MockLLMProvider so no later test file (or a re-run
     // within this file) inherits Flow 4's fixtures.
     setOrchestrator(new AIOrchestrationService(new MockLLMProvider()));
