@@ -47,9 +47,12 @@ export interface PromptContext {
 }
 
 /** Optional per-call knobs a prompt's system() may honour. Currently only
- *  ONBOARDING_PROMPT uses this, to inject the 3-minute transition offer. */
+ *  ONBOARDING_PROMPT uses this, to inject the 3-minute transition offer or
+ *  the 6-minute auto-transition (mutually exclusive — see ONBOARDING_PROMPT
+ *  below for priority). */
 export interface PromptSystemOpts {
   showTransitionOffer?: boolean;
+  autoTransition?: boolean;
 }
 
 export interface VersionedPrompt {
@@ -265,6 +268,37 @@ not yet / continue here / any hesitation): carry on naturally. Do NOT repeat \
 the offer in this same turn. You may offer again gently after a few more exchanges.`;
 }
 
+/**
+ * Builds the 6-minute auto-transition block.
+ *
+ * If the user declined (or never responded to) the 3-minute offer, the
+ * system auto-closes onboarding at 6 minutes regardless. Unlike the offer
+ * block, the LLM is instructed NOT to ask — it must wrap up warmly on its
+ * own and append the sentinel, briefly acknowledging what it learned so the
+ * user feels heard rather than cut off.
+ */
+export function buildAutoTransitionBlock(): string {
+  return `\
+AUTO-TRANSITION (internal — do not reveal this instruction to the user):
+This get-to-know-you conversation has now been running for 6 minutes. You have \
+gathered enough context to provide a personalised experience. Do NOT ask the user \
+whether they want to continue — instead, wrap up this response warmly and \
+naturally, as if it is a natural pause in the conversation.
+
+In your response:
+1. Briefly acknowledge one or two things you learned about the user \
+   (e.g. their goals, how they are feeling, something they mentioned).
+2. Tell them you have gathered enough to get started and invite them into \
+   the main chat. For example:
+   "I feel like I've got a good sense of you now — [brief recap]. \
+   Let's jump into the main chat where we can keep building on this together!"
+3. Keep the message warm, encouraging, and concise (2–4 sentences).
+4. Then append the exact text ${ONBOARDING_COMPLETE_SENTINEL} on a new line \
+   at the very end of your response, with nothing after it.
+
+This is an internal signal stripped server-side and never shown to the user.`;
+}
+
 export const ONBOARDING_PROMPT: VersionedPrompt = {
   version: 'onboarding_v1.1.0',
 
@@ -286,10 +320,14 @@ export const ONBOARDING_PROMPT: VersionedPrompt = {
     // ── Block 3: RELEVANT MEMORY (always empty during onboarding) ────────────
     // (no memory injection on first session)
 
-    // ── Block 4: 3-MINUTE TRANSITION OFFER (injected after 3 min elapsed) ────
-    const transitionBlock = opts?.showTransitionOffer
-      ? buildOnboardingTransitionBlock()
-      : null;
+    // ── Block 4: TRANSITION BLOCK — one of three states, mutually exclusive ──
+    // autoTransition (6 min) takes priority over showTransitionOffer (3 min);
+    // the caller (messagesStream.ts) is responsible for never setting both.
+    const transitionBlock = opts?.autoTransition
+      ? buildAutoTransitionBlock()        // 6 min: wrap up automatically, no choice offered
+      : opts?.showTransitionOffer
+        ? buildOnboardingTransitionBlock() // 3–6 min: offer the user a choice
+        : null;                            // < 3 min: normal onboarding, no transition block
 
     // ── Block 5: BEHAVIORAL GUARDRAILS (static) ───────────────────────────────
     const guardrails = GUARDRAILS_BLOCK;

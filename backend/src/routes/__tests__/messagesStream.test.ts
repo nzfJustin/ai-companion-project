@@ -60,6 +60,7 @@ import {
   ONBOARDING_COMPLETE_SENTINEL,
   stripOnboardingSentinel,
   buildOnboardingTransitionBlock,
+  buildAutoTransitionBlock,
 } from '../v1/messagesStream';
 import { aiOrchestrationService } from '../../ai/instance';
 import { StreamSession } from '../../lib/streamSessionRegistry';
@@ -98,7 +99,8 @@ function makeFakeResponse() {
 beforeEach(() => {
   jest.clearAllMocks();
   mockDetectEmotion.mockReturnValue({ primary: 'calm', score: 0.5 });
-  delete process.env.ONBOARDING_TRANSITION_MS_OVERRIDE;
+  delete process.env.ONBOARDING_OFFER_MS_OVERRIDE;
+  delete process.env.ONBOARDING_AUTO_MS_OVERRIDE;
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -702,8 +704,8 @@ describe('driveOrchestrationStream — onboarding transition (3-minute offer)', 
     expect(call.promptOpts?.showTransitionOffer).toBeFalsy();
   });
 
-  it('injects the transition block when ONBOARDING_TRANSITION_MS_OVERRIDE=0', async () => {
-    process.env.ONBOARDING_TRANSITION_MS_OVERRIDE = '0';
+  it('injects the transition block when ONBOARDING_OFFER_MS_OVERRIDE=0', async () => {
+    process.env.ONBOARDING_OFFER_MS_OVERRIDE = '0';
 
     const session = new StreamSession('conv-with-offer');
     (aiOrchestrationService.stream as jest.Mock).mockReturnValue(
@@ -728,7 +730,7 @@ describe('driveOrchestrationStream — onboarding transition (3-minute offer)', 
   });
 
   it('does NOT inject the transition block when onboardingDone=true', async () => {
-    process.env.ONBOARDING_TRANSITION_MS_OVERRIDE = '0';
+    process.env.ONBOARDING_OFFER_MS_OVERRIDE = '0';
 
     const session = new StreamSession('conv-already-done');
     (aiOrchestrationService.stream as jest.Mock).mockReturnValue(
@@ -775,7 +777,7 @@ describe('driveOrchestrationStream — onboarding transition (3-minute offer)', 
   });
 
   it('sentinel in the LLM response triggers onboarding_complete=true in done meta', async () => {
-    process.env.ONBOARDING_TRANSITION_MS_OVERRIDE = '0';
+    process.env.ONBOARDING_OFFER_MS_OVERRIDE = '0';
 
     const session = new StreamSession('conv-sentinel-fires');
     (aiOrchestrationService.stream as jest.Mock).mockReturnValue(
@@ -803,7 +805,7 @@ describe('driveOrchestrationStream — onboarding transition (3-minute offer)', 
   });
 
   it('the sentinel is NOT present in any token pushed to the session', async () => {
-    process.env.ONBOARDING_TRANSITION_MS_OVERRIDE = '0';
+    process.env.ONBOARDING_OFFER_MS_OVERRIDE = '0';
 
     const session = new StreamSession('conv-no-sentinel-leak');
     const pushed: string[] = [];
@@ -838,7 +840,7 @@ describe('driveOrchestrationStream — onboarding transition (3-minute offer)', 
   });
 
   it('no sentinel → onboardingComplete is falsy in done meta (user chose to continue)', async () => {
-    process.env.ONBOARDING_TRANSITION_MS_OVERRIDE = '0';
+    process.env.ONBOARDING_OFFER_MS_OVERRIDE = '0';
 
     const session = new StreamSession('conv-user-continues');
     (aiOrchestrationService.stream as jest.Mock).mockReturnValue(
@@ -859,5 +861,188 @@ describe('driveOrchestrationStream — onboarding transition (3-minute offer)', 
     });
 
     expect(session.doneMeta?.onboardingComplete).toBeFalsy();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Auto-transition at 6 minutes (user chose to continue at 3 min, or never
+// responded to the offer)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('buildAutoTransitionBlock', () => {
+  it('returns a non-empty string', () => {
+    expect(buildAutoTransitionBlock().length).toBeGreaterThan(0);
+  });
+
+  it('instructs the LLM to append the sentinel without asking', () => {
+    const block = buildAutoTransitionBlock();
+    expect(block).toContain(ONBOARDING_COMPLETE_SENTINEL);
+  });
+
+  it('explicitly tells the LLM NOT to ask the user', () => {
+    const block = buildAutoTransitionBlock().toLowerCase();
+    expect(block).toMatch(/do not ask|without asking|automatically/);
+  });
+
+  it('instructs the LLM to recap what it learned before transitioning', () => {
+    const block = buildAutoTransitionBlock().toLowerCase();
+    expect(block).toMatch(/recap|acknowledge|learned|gathered|brief/);
+  });
+
+  it('is distinct from buildOnboardingTransitionBlock (no choice offered)', () => {
+    const auto  = buildAutoTransitionBlock().toLowerCase();
+    const offer = buildOnboardingTransitionBlock().toLowerCase();
+    // The offer block asks a question; the auto block does not
+    expect(offer).toMatch(/would you like|prefer to|choice/);
+    expect(auto).not.toMatch(/would you like.*chat.*or/);
+  });
+});
+
+describe('driveOrchestrationStream — auto-transition at 6 minutes', () => {
+  function setupSuccessfulTransaction(messageId = 'assistant-msg-1') {
+    mockTransaction.mockImplementation(async (cb) => {
+      const tx = {
+        insert: () => ({ values: () => ({ returning: async () => [{ id: messageId }] }) }),
+        update: () => ({ set: () => ({ where: async () => undefined }) }),
+      };
+      return cb(tx);
+    });
+  }
+
+  beforeEach(() => setupSuccessfulTransaction());
+
+  it('injects autoTransition=true when ONBOARDING_AUTO_MS_OVERRIDE=0', async () => {
+    process.env.ONBOARDING_OFFER_MS_OVERRIDE = '0';
+    process.env.ONBOARDING_AUTO_MS_OVERRIDE  = '0';
+
+    const session = new StreamSession('conv-auto-transition');
+    (aiOrchestrationService.stream as jest.Mock).mockReturnValue(
+      (async function* () { yield "Great chatting — let's go!"; })(),
+    );
+
+    await driveOrchestrationStream({
+      session,
+      conversationId:        'conv-auto-transition',
+      userId:                'user-1',
+      contextMessages:       [],
+      userProfile:           { displayName: 'Test', timezone: 'UTC', commStyle: 'warm',
+                               onboardingDone: false, contextSummary: null },
+      encryptionService:     new EncryptionService('test-user'),
+      conversationStartedAt: new Date(Date.now() - 1),
+      onboardingDone:        false,
+      jobQueue:              null,
+    });
+
+    const call = (aiOrchestrationService.stream as jest.Mock).mock.calls[0][0];
+    expect(call.promptOpts?.autoTransition).toBe(true);
+    expect(call.promptOpts?.showTransitionOffer).toBeFalsy();
+  });
+
+  it('auto-transition takes priority over offer when both thresholds are exceeded', async () => {
+    // Both set to 0 — auto should win
+    process.env.ONBOARDING_OFFER_MS_OVERRIDE = '0';
+    process.env.ONBOARDING_AUTO_MS_OVERRIDE  = '0';
+
+    const session = new StreamSession('conv-auto-priority');
+    (aiOrchestrationService.stream as jest.Mock).mockReturnValue(
+      (async function* () { yield 'Auto response'; })(),
+    );
+
+    await driveOrchestrationStream({
+      session,
+      conversationId:        'conv-auto-priority',
+      userId:                'user-1',
+      contextMessages:       [],
+      userProfile:           { displayName: 'Test', timezone: 'UTC', commStyle: 'warm',
+                               onboardingDone: false, contextSummary: null },
+      encryptionService:     new EncryptionService('test-user'),
+      conversationStartedAt: new Date(Date.now() - 1),
+      onboardingDone:        false,
+      jobQueue:              null,
+    });
+
+    const call = (aiOrchestrationService.stream as jest.Mock).mock.calls[0][0];
+    // autoTransition wins — showTransitionOffer must not also be true
+    expect(call.promptOpts?.autoTransition).toBe(true);
+    expect(call.promptOpts?.showTransitionOffer).toBeFalsy();
+  });
+
+  it('offer (not auto) is injected when only the 3-minute threshold is exceeded', async () => {
+    process.env.ONBOARDING_OFFER_MS_OVERRIDE = '0';
+    // Auto threshold not overridden — defaults to 6 min, far in the future
+
+    const session = new StreamSession('conv-offer-only');
+    (aiOrchestrationService.stream as jest.Mock).mockReturnValue(
+      (async function* () { yield 'Would you like to jump?'; })(),
+    );
+
+    await driveOrchestrationStream({
+      session,
+      conversationId:        'conv-offer-only',
+      userId:                'user-1',
+      contextMessages:       [],
+      userProfile:           { displayName: 'Test', timezone: 'UTC', commStyle: 'warm',
+                               onboardingDone: false, contextSummary: null },
+      encryptionService:     new EncryptionService('test-user'),
+      conversationStartedAt: new Date(Date.now() - 1),
+      onboardingDone:        false,
+      jobQueue:              null,
+    });
+
+    const call = (aiOrchestrationService.stream as jest.Mock).mock.calls[0][0];
+    expect(call.promptOpts?.showTransitionOffer).toBe(true);
+    expect(call.promptOpts?.autoTransition).toBeFalsy();
+  });
+
+  it('sentinel in auto-transition response sets onboarding_complete=true in done meta', async () => {
+    process.env.ONBOARDING_OFFER_MS_OVERRIDE = '0';
+    process.env.ONBOARDING_AUTO_MS_OVERRIDE  = '0';
+
+    const session = new StreamSession('conv-auto-sentinel');
+    (aiOrchestrationService.stream as jest.Mock).mockReturnValue(
+      (async function* () {
+        yield "I've learned so much about you! Let's jump in.\n";
+        yield ONBOARDING_COMPLETE_SENTINEL;
+      })(),
+    );
+
+    await driveOrchestrationStream({
+      session,
+      conversationId:        'conv-auto-sentinel',
+      userId:                'user-1',
+      contextMessages:       [],
+      userProfile:           { displayName: 'Test', timezone: 'UTC', commStyle: 'warm',
+                               onboardingDone: false, contextSummary: null },
+      encryptionService:     new EncryptionService('test-user'),
+      conversationStartedAt: new Date(Date.now() - 1),
+      onboardingDone:        false,
+      jobQueue:              null,
+    });
+
+    expect(session.doneMeta?.onboardingComplete).toBe(true);
+  });
+
+  it('neither flag injected before either threshold (< 3 min)', async () => {
+    // No overrides — both thresholds are in the future for a brand new conversation
+    const session = new StreamSession('conv-too-early');
+    (aiOrchestrationService.stream as jest.Mock).mockReturnValue(
+      (async function* () { yield 'Tell me about yourself.'; })(),
+    );
+
+    await driveOrchestrationStream({
+      session,
+      conversationId:        'conv-too-early',
+      userId:                'user-1',
+      contextMessages:       [],
+      userProfile:           { displayName: 'Test', timezone: 'UTC', commStyle: 'warm',
+                               onboardingDone: false, contextSummary: null },
+      encryptionService:     new EncryptionService('test-user'),
+      conversationStartedAt: new Date(), // just now — 0ms elapsed
+      onboardingDone:        false,
+      jobQueue:              null,
+    });
+
+    const call = (aiOrchestrationService.stream as jest.Mock).mock.calls[0][0];
+    expect(call.promptOpts).toBeUndefined();
   });
 });
