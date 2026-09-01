@@ -414,8 +414,12 @@ function showToast(msg) {
 
 function esc(s) { return (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function codeMsg(d) {
+  // Backend error responses are shaped { error: CODE, meta: {...} } (see
+  // backend/src/middleware/errorHandler.ts) — the code lives on `error`,
+  // not `error_code`. That mismatch meant this map was silently dead code:
+  // every mapped error fell straight through to displaying the raw code.
   const map = { EMAIL_ALREADY_EXISTS: 'That email is already registered.', INVALID_COMM_STYLE: 'Invalid style.', CONVERSATION_CLOSED: 'This conversation is closed.', TOKEN_EXPIRED: 'Session expired.' };
-  return map[d && d.error_code] || (d && d.message) || (d && d.error) || 'Something went wrong.';
+  return map[d && d.error] || (d && d.message) || (d && d.error) || 'Something went wrong.';
 }
 function fmtDate(s) { if (!s) return ''; return new Date(s).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }); }
 function scrollChat() { const w = document.querySelector('.chat-body'); if (w) requestAnimationFrame(() => { w.scrollTop = w.scrollHeight; }); }
