@@ -10,9 +10,10 @@
 
 jest.mock('../../db', () => ({
   db: {
-    query:  { users: { findFirst: jest.fn() } },
-    update: jest.fn(),
-    select: jest.fn(),
+    query:       { users: { findFirst: jest.fn() } },
+    update:      jest.fn(),
+    select:      jest.fn(),
+    transaction: jest.fn(),
   },
 }));
 
@@ -37,7 +38,8 @@ import { signAccessToken } from '../../lib/jwt';
 const mockFindFirst = db.query.users.findFirst as jest.MockedFunction<
   typeof db.query.users.findFirst
 >;
-const mockUpdate = db.update as jest.MockedFunction<typeof db.update>;
+const mockUpdate      = db.update      as jest.MockedFunction<typeof db.update>;
+const mockTransaction = db.transaction as jest.MockedFunction<typeof db.transaction>;
 
 // ─── Key pair + auth header ───────────────────────────────────────────────────
 
@@ -269,6 +271,91 @@ describe('PATCH /v1/users/me', () => {
 
     expect(res.status).toBe(400);
     expect(res.body.error).toBe('VALIDATION_ERROR');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DELETE /v1/users/me (#51)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('DELETE /v1/users/me', () => {
+  /**
+   * Tracks the two tx.update() calls the handler makes, in order — first
+   * users (soft-delete), then authSessions (revoke) — so tests can assert
+   * on what each one set. A plain mock can't distinguish the two drizzle
+   * table objects by identity, so call order stands in for "which table".
+   */
+  function setupTransactionMock() {
+    const calls: Array<{ table: 'users' | 'authSessions'; setArg: unknown }> = [];
+
+    mockTransaction.mockImplementation(async (cb) => {
+      const tx = {
+        update: jest.fn(() => {
+          const table = calls.length === 0 ? 'users' : 'authSessions';
+          const set = jest.fn((setArg: unknown) => {
+            calls.push({ table, setArg });
+            return { where: jest.fn().mockResolvedValue(undefined) };
+          });
+          return { set };
+        }),
+      };
+      return cb(tx as never);
+    });
+
+    return calls;
+  }
+
+  it('returns 401 without an Authorization header', async () => {
+    const res = await request(app).delete('/v1/users/me');
+    expect(res.status).toBe(401);
+  });
+
+  it('returns 204 with no body on success', async () => {
+    setupTransactionMock();
+
+    const res = await request(app)
+      .delete('/v1/users/me')
+      .set('Authorization', authHeader);
+
+    expect(res.status).toBe(204);
+    expect(res.body).toEqual({});
+  });
+
+  it('runs the soft-delete and session-revocation inside a single transaction', async () => {
+    setupTransactionMock();
+
+    await request(app).delete('/v1/users/me').set('Authorization', authHeader);
+
+    expect(mockTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('sets deletedAt on the users row', async () => {
+    const calls = setupTransactionMock();
+
+    await request(app).delete('/v1/users/me').set('Authorization', authHeader);
+
+    expect(calls[0].table).toBe('users');
+    expect(calls[0].setArg).toMatchObject({ deletedAt: expect.any(Date) });
+  });
+
+  it('revokes the authenticated user\'s active auth sessions', async () => {
+    const calls = setupTransactionMock();
+
+    await request(app).delete('/v1/users/me').set('Authorization', authHeader);
+
+    expect(calls[1].table).toBe('authSessions');
+    expect(calls[1].setArg).toMatchObject({ revokedAt: expect.any(Date) });
+  });
+
+  it('clears the refresh_token cookie in the response', async () => {
+    setupTransactionMock();
+
+    const res = await request(app)
+      .delete('/v1/users/me')
+      .set('Authorization', authHeader);
+
+    const setCookie = (res.headers['set-cookie'] as unknown as string[]) ?? [];
+    expect(setCookie.some((c) => c.startsWith('refresh_token=;'))).toBe(true);
   });
 });
 

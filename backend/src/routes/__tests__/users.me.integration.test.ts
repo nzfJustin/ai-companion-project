@@ -203,3 +203,96 @@ describe('PATCH /v1/users/me (integration)', () => {
     expect(res.status).toBe(401);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('DELETE /v1/users/me (integration)', () => {
+  it('returns 401 with no token', async () => {
+    const res = await request(app).delete('/v1/users/me');
+    expect(res.status).toBe(401);
+  });
+
+  it('returns 204 with no body and sets deleted_at on the user row', async () => {
+    const token  = await registerAndLogin();
+    const userId = await getUserId();
+
+    const res = await request(app)
+      .delete('/v1/users/me')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(204);
+    expect(res.body).toEqual({});
+
+    const dbUser = await db.query.users.findFirst({ where: eq(users.id, userId) });
+    expect(dbUser?.deletedAt).not.toBeNull();
+  });
+
+  it('is idempotent — deleting an already-deleted account still returns 204', async () => {
+    const token = await registerAndLogin();
+
+    const first  = await request(app).delete('/v1/users/me').set('Authorization', `Bearer ${token}`);
+    const second = await request(app).delete('/v1/users/me').set('Authorization', `Bearer ${token}`);
+
+    expect(first.status).toBe(204);
+    expect(second.status).toBe(204);
+  });
+
+  it('GET /v1/users/me returns 404 afterward, even with the still-valid access token', async () => {
+    // authenticate.ts is stateless — it verifies the JWT but never looks up
+    // the user, so the access token itself keeps working. The 404 comes
+    // from GET /v1/users/me's own deletedAt check (same as an already
+    // soft-deleted user, per the unit test coverage for that check).
+    const token = await registerAndLogin();
+    await request(app).delete('/v1/users/me').set('Authorization', `Bearer ${token}`);
+
+    const res = await request(app).get('/v1/users/me').set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(404);
+  });
+
+  it('a subsequent login attempt with the same credentials fails', async () => {
+    const token = await registerAndLogin();
+    await request(app).delete('/v1/users/me').set('Authorization', `Bearer ${token}`);
+
+    const res = await request(app)
+      .post('/v1/auth/login')
+      .send({ email: TEST_EMAIL, password: TEST_PASSWORD });
+
+    expect(res.status).toBe(401);
+  });
+
+  it('revokes every active session — a refresh token valid at deletion time is rejected afterward', async () => {
+    await request(app).post('/v1/auth/register').send({
+      email:        TEST_EMAIL,
+      password:     TEST_PASSWORD,
+      display_name: 'Users Me Tester',
+    });
+
+    const loginRes = await request(app)
+      .post('/v1/auth/login')
+      .send({ email: TEST_EMAIL, password: TEST_PASSWORD });
+
+    const accessToken  = loginRes.body.access_token as string;
+    const refreshCookie = loginRes.headers['set-cookie'] as unknown as string[];
+
+    await request(app)
+      .delete('/v1/users/me')
+      .set('Authorization', `Bearer ${accessToken}`);
+
+    const refreshRes = await request(app)
+      .post('/v1/auth/refresh')
+      .set('Cookie', refreshCookie);
+
+    expect(refreshRes.status).toBe(401);
+  });
+
+  it('clears the requester\'s own refresh cookie in the response', async () => {
+    const token = await registerAndLogin();
+
+    const res = await request(app)
+      .delete('/v1/users/me')
+      .set('Authorization', `Bearer ${token}`);
+
+    const setCookie = (res.headers['set-cookie'] as unknown as string[]) ?? [];
+    expect(setCookie.some((c) => c.startsWith('refresh_token=;'))).toBe(true);
+  });
+});
