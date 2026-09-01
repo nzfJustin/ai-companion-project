@@ -1,0 +1,19 @@
+{
+  "name": "memo-e2e",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "test":        "playwright test",
+    "test:auth":   "playwright test tests/auth.spec.ts",
+    "test:onboard":"playwright test tests/onboarding.spec.ts",
+    "test:chat":   "playwright test tests/chat.spec.ts",
+    "test:memory": "playwright test tests/memory.spec.ts",
+    "test:trends": "playwright test tests/trends.spec.ts",
+    "test:settings":"playwright test tests/settings.spec.ts",
+    "report":      "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.44.0",
+    "typescript": "^5.4.0"
+  }
+}
