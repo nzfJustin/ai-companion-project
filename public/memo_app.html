@@ -236,6 +236,7 @@ async function loadOrCreateConv() {
 async function doSend(content) {
   if (!content.trim() || S.streaming || !S.convId) return;
   S.streaming = true;
+  syncSendBtn();
   const uid = 'u' + Date.now(), aid = 'a' + Date.now();
   S.msgs.push({ role: 'user', content, id: uid });
   S.msgs.push({ role: 'ai', content: '', id: aid, typing: true });
@@ -248,14 +249,14 @@ async function doSend(content) {
     });
     // Handle 401 with refresh
     if (res.status === 401) {
-      S.msgs.pop(); S.msgs.pop(); S.streaming = false;
+      S.msgs.pop(); S.msgs.pop(); S.streaming = false; syncSendBtn();
       const refreshed = await tryRefresh();
       if (refreshed) { doSend(content); return; }
       S.token = null; save(); go('login'); return;
     }
     // 409 during onboarding = backend closed the conversation via sentinel
     if (res.status === 409 && S.screen === 'onboarding') {
-      S.msgs.pop(); S.msgs.pop(); S.streaming = false;
+      S.msgs.pop(); S.msgs.pop(); S.streaming = false; syncSendBtn();
       S.convId = null;
       showToast('Onboarding complete! Taking you to the app...');
       await loadUser();
@@ -265,7 +266,7 @@ async function doSend(content) {
     }
     if (!res.ok || !res.body) {
       patchMsg(aid, { content: 'Something went wrong. Try again.', typing: false });
-      S.streaming = false; return;
+      S.streaming = false; syncSendBtn(); return;
     }
     const reader = res.body.getReader(), dec = new TextDecoder();
     let buf = '', evType = '';
@@ -284,6 +285,7 @@ async function doSend(content) {
             else if (evType === 'done') {
               patchMsg(aid, { typing: false, emotion: data.emotion_tags });
               S.streaming = false;
+              syncSendBtn();
               if (S.screen === 'onboarding') {
                 if (data.onboardingComplete) {
                   // Backend confirmed sentinel — transition immediately
@@ -297,14 +299,14 @@ async function doSend(content) {
               }
             } else if (evType === 'error') {
               const txt = data.code === 'LLM_TIMEOUT' ? "I'm having a quiet moment — could you share that again?" : 'Something went wrong.';
-              patchMsg(aid, { content: txt, typing: false }); S.streaming = false;
+              patchMsg(aid, { content: txt, typing: false }); S.streaming = false; syncSendBtn();
             }
           } catch(e) {}
           evType = '';
         }
       }
     }
-  } catch(e) { patchMsg(aid, { content: 'Connection lost. Please try again.', typing: false }); S.streaming = false; }
+  } catch(e) { patchMsg(aid, { content: 'Connection lost. Please try again.', typing: false }); S.streaming = false; syncSendBtn(); }
 }
 
 async function checkOnboarding() {
@@ -424,6 +426,14 @@ function codeMsg(d) {
 function fmtDate(s) { if (!s) return ''; return new Date(s).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }); }
 function scrollChat() { const w = document.querySelector('.chat-body'); if (w) requestAnimationFrame(() => { w.scrollTop = w.scrollHeight; }); }
 function renderMsgs() { const w = document.querySelector('.chat-body'); if (w) { w.innerHTML = msgsHTML(); scrollChat(); } }
+// doSend() flips S.streaming and updates the message list via renderMsgs()
+// (not the full render()) so streaming tokens don't re-render the whole
+// screen — but that means the send button's `disabled` attribute, which
+// chatInput() sets from S.streaming, never gets updated: the button stays
+// clickable (in appearance only — doSend()'s own `if (S.streaming) return`
+// guard still no-ops a duplicate click) for the entire time a message is
+// streaming. Sync just the button directly wherever S.streaming changes.
+function syncSendBtn() { const b = document.querySelector('.send-btn'); if (b) b.disabled = S.streaming; }
 
 function msgsHTML() {
   if (S.sessionJustEnded) {
