@@ -81,7 +81,7 @@ test.describe('Onboarding flow', () => {
     // Chat input should be visible
     await expect(page.locator('#ci')).toBeVisible();
     // End button should be visible
-    await expect(page.locator('button:has-text("End")')).toBeVisible();
+    await expect(page.locator('button.ico-btn:has-text("End")')).toBeVisible();
 
     await deleteCurrentUser(page);
   });

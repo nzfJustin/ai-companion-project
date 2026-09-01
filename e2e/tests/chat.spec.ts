@@ -32,8 +32,12 @@ test.beforeAll(async ({ browser }) => {
 test.afterAll(async ({ browser }) => {
   const page = await browser.newPage();
   const { login } = await import('../helpers/app');
+  // bypassOnboarding() (used to set up sharedUser) only touches frontend
+  // state — it never sets onboarding_done in the DB — so this fresh login
+  // correctly re-lands on 'onboarding', not 'main'. deleteCurrentUser()
+  // only needs S.token, which login() has already set regardless of
+  // which screen it settled on, so there's nothing to wait for here.
   await login(page, sharedUser);
-  await waitForScreen(page, 'main');
   await deleteCurrentUser(page);
   await page.close();
 });
@@ -52,7 +56,7 @@ test.beforeEach(async ({ page }) => {
 test.describe('Chat UI', () => {
   test('main chat screen has correct UI elements', async ({ page }) => {
     await expect(page.locator('.topbar-t')).toBeVisible();
-    await expect(page.locator('button:has-text("End")')).toBeVisible();
+    await expect(page.locator('button.ico-btn:has-text("End")')).toBeVisible();
     await expect(page.locator('#ci')).toBeVisible();
     await expect(page.locator('.send-btn')).toBeVisible();
     await expect(page.locator('.bnav')).toBeVisible();
@@ -147,7 +151,7 @@ test.describe('Session management', () => {
     // Chat input should be gone
     await expect(page.locator('#ci')).not.toBeVisible();
     // End button should be gone
-    await expect(page.locator('button:has-text("End")')).not.toBeVisible();
+    await expect(page.locator('button.ico-btn:has-text("End")')).not.toBeVisible();
   });
 
   test('after ending session, new conversation is created', async ({ page }) => {

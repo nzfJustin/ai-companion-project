@@ -70,10 +70,52 @@ export async function register(page: Page, user: TestUser): Promise<void> {
  */
 export async function login(page: Page, user: TestUser): Promise<void> {
   await page.goto('/');
-  await waitForScreen(page, 'login');
+
+  // boot() briefly shows 'loading' while it checks a stored access token
+  // (if any) before settling into 'login' (no/invalid token) or
+  // 'onboarding'/'main' (valid token — auto-authenticated). Wait for that
+  // settled state rather than reading S.screen immediately, which races
+  // the in-flight check.
+  await page.waitForFunction(
+    () => {
+      const s = (window as any).S?.screen;
+      return s === 'login' || s === 'onboarding' || s === 'main';
+    },
+    { timeout: 15_000 },
+  );
+
+  const settled = await page.evaluate(() => (window as any).S?.screen);
+
+  // A previously-stored, still-valid access token (from an earlier login()
+  // call against this same page/context) auto-authenticates straight past
+  // the login screen on this reload — correct, intentional app behavior
+  // (see boot() above), not something to work around by trying to fill a
+  // login form that isn't there. Treat it as already logged in.
+  if (settled === 'onboarding' || settled === 'main') return;
+
   await page.fill('#le', user.email);
   await page.fill('#lp', user.password);
   await page.click('button.btn-p:has-text("Sign in")');
+
+  // Wait for the async login flow (doLogin -> loadUser -> afterAuth) to
+  // settle into a stable post-auth screen before returning. Without this,
+  // callers reading S.screen right after login() race the in-flight
+  // request: the read can catch 'login' (unchanged yet) or a transient
+  // 'loading' state just before it flips to 'onboarding' or 'main', which
+  // makes the common `if (screen === 'onboarding') bypassOnboarding()`
+  // pattern used across the other specs unreliable — the check misses
+  // 'onboarding', bypassOnboarding() never runs, and the caller's
+  // subsequent waitForScreen(page, 'main') times out even though the app
+  // is behaving correctly (bypassOnboarding only touches frontend state,
+  // so a fresh login always re-lands on 'onboarding' until the DB flag is
+  // actually set — see its own doc comment below).
+  await page.waitForFunction(
+    () => {
+      const s = (window as any).S?.screen;
+      return s === 'onboarding' || s === 'main';
+    },
+    { timeout: 15_000 },
+  );
 }
 
 /**
@@ -175,9 +217,13 @@ export async function bypassOnboarding(page: Page): Promise<void> {
  */
 export async function endSession(page: Page): Promise<void> {
   await page.click('button.ico-btn:has-text("End")');
-  // Wait for sessionJustEnded state
+  // doCloseConv() sets S.sessionJustEnded = true BEFORE awaiting
+  // loadOrCreateConv() (see memo_app.html) — that call is what actually
+  // creates the next conversation and sets the new S.convId. Waiting only
+  // for sessionJustEnded races that: a caller reading S.convId right after
+  // this resolves can still see the old (null'd-out) value. Wait for both.
   await page.waitForFunction(
-    () => (window as any).S?.sessionJustEnded === true,
+    () => (window as any).S?.sessionJustEnded === true && !!(window as any).S?.convId,
     { timeout: 15_000 },
   );
 }

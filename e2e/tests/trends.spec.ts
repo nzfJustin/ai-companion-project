@@ -38,8 +38,12 @@ test.beforeAll(async ({ browser }) => {
 
 test.afterAll(async ({ browser }) => {
   const page = await browser.newPage();
+  // bypassOnboarding() (used to set up sharedUser) only touches frontend
+  // state — it never sets onboarding_done in the DB — so this fresh login
+  // correctly re-lands on 'onboarding', not 'main'. deleteCurrentUser()
+  // only needs S.token, which login() has already set regardless of
+  // which screen it settled on, so there's nothing to wait for here.
   await login(page, sharedUser);
-  await waitForScreen(page, 'main');
   await deleteCurrentUser(page);
   await page.close();
 });
