@@ -2,22 +2,24 @@
  * src/routes/v1/users.router.ts
  *
  * User profile routes:
- *   GET   /v1/users/me          (P1-08 / TDD P1-005) ✓
- *   PATCH /v1/users/me          (P1-08 / TDD P1-005) ✓
- *   GET   /v1/users/me/streak   (T-008) ✓
+ *   GET    /v1/users/me          (P1-08 / TDD P1-005) ✓
+ *   PATCH  /v1/users/me          (P1-08 / TDD P1-005) ✓
+ *   DELETE /v1/users/me          (#51) ✓
+ *   GET    /v1/users/me/streak   (T-008) ✓
  *
  * All routes require authentication (Bearer access token).
  */
 
 import { Router } from 'express';
 import { z }      from 'zod';
-import { eq }     from 'drizzle-orm';
+import { eq, and, isNull } from 'drizzle-orm';
 import { db }     from '../../db';
-import { users, userStreaks, commStyleEnum } from '../../db/schema';
+import { users, userStreaks, authSessions, commStyleEnum } from '../../db/schema';
 import { authenticate }  from '../../middleware/authenticate';
 import { globalRateLimit } from '../../middleware/rateLimit';
 import { validate, displayNameSchema } from '../../middleware/validate';
 import { AppError }      from '../../lib/errors';
+import { REFRESH_COOKIE_NAME, refreshCookieOptions } from '../../lib/jwt';
 
 export const usersRouter = Router();
 
@@ -181,6 +183,54 @@ usersRouter.patch(
     }
   },
 );
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DELETE /v1/users/me (#51)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Soft delete — sets deleted_at to NOW() and revokes every active refresh
+// session, so the account is immediately unusable even though the row (and
+// its conversations/messages/memories) stays in the database for the
+// eventual hard-delete/anonymisation background job. Same pattern as
+// DELETE /v1/memories/:id; see the users table's "Soft-delete — anonymised
+// by deletion job, not dropped" comment in db/schema.ts.
+//
+// The access token used to MAKE this request keeps working until it
+// naturally expires — authenticate.ts is stateless and never looks up the
+// session, same documented tradeoff as POST /v1/auth/logout — but no new
+// access token can be minted afterward: every session is revoked here, and
+// refresh already rejects a revoked session with 401. GET/PATCH /v1/users/me
+// and the login handler already treat a deletedAt user as not-found /
+// invalid-credentials.
+//
+// Idempotent: re-running this on an already-deleted account just re-sets
+// deleted_at and revokes nothing further (no sessions left to revoke) —
+// still 204, not an error.
+
+usersRouter.delete('/me', async (req, res, next) => {
+  const userId = req.userId!;
+
+  try {
+    await db.transaction(async (tx) => {
+      await tx
+        .update(users)
+        .set({ deletedAt: new Date() })
+        .where(eq(users.id, userId));
+
+      await tx
+        .update(authSessions)
+        .set({ revokedAt: new Date() })
+        .where(and(eq(authSessions.userId, userId), isNull(authSessions.revokedAt)));
+    });
+
+    // Clear the requester's own refresh cookie, mirroring logout's response.
+    res.cookie(REFRESH_COOKIE_NAME, '', refreshCookieOptions(0));
+
+    return res.status(204).send();
+  } catch (err) {
+    return next(err);
+  }
+});
 
 // ─── GET /v1/users/me/streak (T-008) ──────────────────────────────────────────
 
