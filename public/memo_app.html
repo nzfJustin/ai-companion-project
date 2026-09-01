@@ -120,7 +120,12 @@ select.inline { background: var(--s2); border: 1px solid var(--bdr2); border-rad
 <script>
 'use strict';
 const $ = id => document.getElementById(id);
-const S = {
+// `var` (not `const`) — top-level `var` in a classic script attaches to
+// `window`, so `window.S` is reachable from outside the script (e.g. E2E
+// tests driving the page via Playwright's page.evaluate). `const`/`let`
+// would still work fine for every bare `S.foo` reference within this
+// script, but would NOT be visible as `window.S`.
+var S = {
   screen: 'loading', token: null, user: null, convId: null, msgs: [],
   memories: [], memDetail: null, trends: [], streak: null,
   streaming: false, error: null, loading: false, nav: 'chat',
