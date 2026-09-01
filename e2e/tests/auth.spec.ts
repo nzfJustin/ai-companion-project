@@ -35,7 +35,10 @@ test.describe('Registration', () => {
     await register(page, user);
     await waitForScreen(page, 'onboarding');
 
-    // Logout and try to register same email again
+    // go('login') only changes S.screen for the UI — it does NOT log the
+    // user out (no token/localStorage change), so the just-registered
+    // session stays valid underneath. That's fine here: registering again
+    // with the same email doesn't require actually being logged out.
     await page.evaluate(() => (window as any).go('login'));
     await page.click('button:has-text("Create account")');
     await waitForScreen(page, 'register');
@@ -47,9 +50,11 @@ test.describe('Registration', () => {
     await expect(page.locator('.err')).toBeVisible();
     await expect(page.locator('.err')).toContainText('already registered');
 
-    // Login to clean up
-    await page.evaluate(() => (window as any).go('login'));
-    await login(page, user);
+    // Clean up. The original registration's token is still valid (never
+    // actually logged out above), so no need to log back in — doing so via
+    // login()'s page.goto('/') would just have boot() auto-authenticate
+    // past the login screen anyway, hanging waitForScreen(page, 'login')
+    // forever.
     await deleteCurrentUser(page);
   });
 
