@@ -44,15 +44,33 @@ export async function enqueueExtractionJob(
   payload: ExtractionJobEnqueuePayload,
 ): Promise<void> {
   try {
-    await boss.send(JOB_MEMORY_EXTRACTION, payload, {
+    const jobId = await boss.send(JOB_MEMORY_EXTRACTION, payload, {
       retryLimit:   MAX_EXTRACTION_ATTEMPTS - 1,
       retryDelay:   30,
       retryBackoff: true,
     });
+
+    // boss.send() does NOT throw if the target queue doesn't exist yet in
+    // Postgres (e.g. a request lands before startJobQueue()'s createQueue()
+    // has committed) — it just resolves with null and nothing is inserted.
+    // That used to look identical to a successful enqueue: this log line
+    // would fire, and the conversation would silently never get a memory.
+    // Treat a null jobId as the failure it is so it's visible/alertable.
+    if (!jobId) {
+      logError({
+        event:           'extraction_enqueue_returned_null',
+        conversation_id: payload.conversation_id,
+        user_id:         payload.user_id,
+        note:             'boss.send() resolved with no job id — job was not inserted (queue not ready?)',
+      });
+      return;
+    }
+
     log({
       event:           'extraction_job_enqueued',
       conversation_id: payload.conversation_id,
       user_id:         payload.user_id,
+      job_id:          jobId,
     });
   } catch (err) {
     logError({
