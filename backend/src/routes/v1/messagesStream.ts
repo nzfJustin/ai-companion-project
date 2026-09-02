@@ -19,7 +19,7 @@ import { eq, sql }        from 'drizzle-orm';
 import type { Response }  from 'express';
 import type PgBoss        from 'pg-boss';
 import { db }             from '../../db';
-import { conversations, messages, userContext } from '../../db/schema';
+import { conversations, messages, userContext, users } from '../../db/schema';
 import type { EncryptionService }  from '../../services/EncryptionService';
 import { detectEmotion }           from '../../services/EmotionDetector';
 import { appendToContextCache }    from '../../lib/conversationContextCache';
@@ -408,6 +408,11 @@ export async function driveOrchestrationStream(params: DriveStreamParams): Promi
           .update(userContext)
           .set({ sessionCount: sql`${userContext.sessionCount} + 1` })
           .where(eq(userContext.userId, userId));
+
+        await tx
+          .update(users)
+          .set({ onboardingDone: true })
+          .where(eq(users.id, userId));
       });
 
       if (jobQueue) {
