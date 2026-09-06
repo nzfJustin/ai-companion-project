@@ -47,7 +47,7 @@ import {
   attachToSession,
   driveOrchestrationStream,
 } from './messagesStream';
-import { enqueueExtractionJob } from '../../jobs';
+import { runExtractionSweepTick } from '../../jobs/extractionSweep';
 import type { Message } from '../../ai/llm/types';
 
 export const conversationsRouter = Router();
@@ -209,13 +209,16 @@ conversationsRouter.patch(
         return closed;
       });
 
-      // Enqueue memory extraction job via pg-boss (P1-19).
-      // Fire-and-forget: the close response must not wait on the queue write.
-      if (_jobQueue) {
-        void enqueueExtractionJob(_jobQueue, { conversation_id: id, user_id: req.userId! });
-      } else {
-        warn({ event: 'extraction_enqueue_skipped_no_queue', conversation_id: id });
-      }
+      // Trigger extraction (P1-19). status='closed' (just committed above)
+      // is itself the durable trigger — this call is only a best-effort
+      // latency kick to process it right away instead of waiting for the
+      // next sweep tick; the periodic sweep (src/jobs/extractionSweep.ts)
+      // picks up any closed conversation unconditionally, so this can never
+      // silently lose the extraction the way a fire-and-forget pg-boss
+      // enqueue could. Fire-and-forget: the close response must not wait
+      // on it, and the atomic claim inside the sweep makes it safe to run
+      // concurrently with the periodic tick without risk of a duplicate.
+      void runExtractionSweepTick();
 
       return res.status(200).json({
         id:         updated.id,

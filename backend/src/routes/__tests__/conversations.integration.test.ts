@@ -152,10 +152,15 @@ describe('PATCH /v1/conversations/:id (integration)', () => {
     expect(patchRes.body.status).toBe('closed');
     expect(patchRes.body.ended_at).toBeTruthy();
 
+    // Closing also fires a best-effort extraction sweep tick (fire-and-
+    // forget, see extractionSweep.ts) — this conversation has no messages,
+    // so extraction is near-instant, and status may have already moved
+    // past 'closed' to 'extracting'/'summarized' by the time this direct
+    // DB read runs. Assert what close actually guarantees.
     const saved = await db.query.conversations.findFirst({
       where: eq(conversations.id, id),
     });
-    expect(saved!.status).toBe('closed');
+    expect(['closed', 'extracting', 'summarized']).toContain(saved!.status);
     expect(saved!.endedAt).not.toBeNull();
   });
 
@@ -266,11 +271,16 @@ describe('GET /v1/conversations/:id (integration)', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({ status: 'closed' });
 
-    // Get after close
+    // Get after close. Closing also fires a best-effort extraction sweep
+    // tick (see extractionSweep.ts) — for this conversation (no messages)
+    // extraction is near-instant, so by the time this GET runs the status
+    // may legitimately have already moved past 'closed' to 'extracting' or
+    // even 'summarized'. Assert on what close actually guarantees (no
+    // longer active, ended_at set) rather than one exact status value.
     const getAfterClose = await request(app)
       .get(`/v1/conversations/${id}`)
       .set('Authorization', `Bearer ${token}`);
-    expect(getAfterClose.body.status).toBe('closed');
+    expect(['closed', 'extracting', 'summarized']).toContain(getAfterClose.body.status);
     expect(getAfterClose.body.ended_at).toBeTruthy();
   });
 });

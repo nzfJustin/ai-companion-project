@@ -94,6 +94,7 @@ export const regionEnum = pgEnum('region', ['us', 'eu']);
 export const conversationStatusEnum = pgEnum('conversation_status', [
   'active',
   'closed',
+  'extracting',
   'summarized',
   'extraction_failed',
 ]);
@@ -228,6 +229,14 @@ export const conversations = pgTable(
     messageCount: integer('message_count').notNull().default(0),
     startedAt:    timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
     endedAt:      timestamp('ended_at', { withTimezone: true }),
+    // Extraction sweep bookkeeping (replaces the old pg-boss-based
+    // memory_extraction job + reconciler — see jobs/extractionSweep.ts).
+    // extractionClaimedAt is set when a sweep tick atomically claims this
+    // conversation (status -> 'extracting'); a claim older than the sweep's
+    // stuck-claim timeout with no result is reclaimed automatically, so a
+    // crashed mid-extraction run can't leave a conversation stuck forever.
+    extractionClaimedAt: timestamp('extraction_claimed_at', { withTimezone: true }),
+    extractionAttempts:  integer('extraction_attempts').notNull().default(0),
   },
   (t) => ({
     userIdIdx:   index('conversations_user_id_idx').on(t.userId),

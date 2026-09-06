@@ -13,6 +13,7 @@ import { closeDb }       from './db';
 import { closeRedis }    from './lib/redis';
 import { startJobQueue } from './jobs';
 import { setJobQueue }   from './routes/v1/conversations.router';
+import { startExtractionSweep, stopExtractionSweep } from './jobs/extractionSweep';
 
 // Fail immediately if required vars are missing — before any I/O
 validateEnv();
@@ -43,17 +44,22 @@ boss.on('error', (err: Error) => console.error('[pg-boss] error', err));
 let server: ReturnType<typeof app.listen> | undefined;
 
 async function start(): Promise<void> {
+  // Memory extraction no longer depends on pg-boss at all (see
+  // jobs/extractionSweep.ts) — start it unconditionally and first, so a
+  // pg-boss outage (which still runs inactivity_close) can never take
+  // memory generation down with it.
+  startExtractionSweep();
+
   try {
     await boss.start();
     await startJobQueue(boss);
     setJobQueue(boss);
     console.log('[pg-boss] job queue started');
   } catch (err) {
-    // A broken job queue means every conversation close will silently fail
-    // to enqueue extraction (routes degrade gracefully — see
-    // extraction_enqueue_skipped_no_queue — but nothing will ever run).
-    // That's a production incident, not something to boot past quietly.
-    console.error('[pg-boss] failed to start — extraction jobs will not run', err);
+    // Memory extraction is unaffected (see startExtractionSweep() above) —
+    // this only takes down inactivity_close. Still a production incident
+    // worth surfacing loudly, not booting past quietly.
+    console.error('[pg-boss] failed to start — inactivity auto-close will not run', err);
   }
 
   // ── HTTP server ─────────────────────────────────────────────────────────────
@@ -67,6 +73,7 @@ void start();
 // ── Graceful shutdown ─────────────────────────────────────────────────────────
 async function shutdown(signal: string): Promise<void> {
   console.log(`[server] ${signal} received — shutting down gracefully`);
+  stopExtractionSweep();
 
   // A signal arriving during the brief pg-boss-setup window (before
   // app.listen() has run) would otherwise throw on server.close(). Fall

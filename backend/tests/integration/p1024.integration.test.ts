@@ -20,29 +20,9 @@
  *   - Tables truncated between test FILES (handled by beforeAll/afterAll here)
  *   - Every security-critical test has a corresponding negative-case test
  *   - Suite must complete in under 3 minutes
- *
- * pg-boss note: pg-boss ships as a pure ESM package with no CJS build, and
- * nothing in this codebase constructs a real instance yet (it isn't wired
- * into src/index.ts at startup) — see the import comment further down for
- * why the job queue is a spy here rather than a real PgBoss instance.
  */
 
 import request  from 'supertest';
-// pg-boss ships as a pure ESM package ("type": "module", no CJS build). Both
-// a static `import { PgBoss } from 'pg-boss'` AND a dynamic `import('pg-boss')`
-// fail under Jest — Jest's runtime hooks intercept dynamic import() too (it
-// needs to, for its module registry/mocking to work), routing it through the
-// same "node_modules is excluded from transform" wall as a static import.
-// No file anywhere in this codebase actually constructs `new PgBoss(...)`
-// yet (pg-boss isn't wired into src/index.ts at startup), so there's no
-// existing precedent to fall back on either. Rather than pull in new
-// dependencies (@babel/preset-env + a JS transform just for this one
-// package), inject a spy standing in for the queue — enqueueExtractionJob()
-// only ever calls `.send(name, payload, options)` on it, so this still
-// exercises the real conversation-close → enqueue call path end-to-end;
-// it just verifies the call arguments (below) instead of a real row landing
-// in pgboss.job.
-import type PgBoss from 'pg-boss';
 import { eq, and } from 'drizzle-orm';
 import { app }  from '../../src/app';
 import { db }   from '../../src/db';
@@ -54,13 +34,12 @@ import {
   memories,
   userMemoryPins,
 } from '../../src/db/schema';
-import { setJobQueue } from '../../src/routes/v1/conversations.router';
 // setOrchestrator moved from conversations.router.ts to ai/instance.ts as
 // part of the onboarding-transition refactor (messagesStream.ts now imports
 // the aiOrchestrationService singleton directly rather than conversations.router.ts
 // passing it in) — see ai/instance.ts for why it's a settable proxy.
 import { setOrchestrator } from '../../src/ai/instance';
-import { JOB_MEMORY_EXTRACTION } from '../../src/jobs';
+import { runExtractionSweepTick } from '../../src/jobs/extractionSweep';
 import { EncryptionService } from '../../src/services/EncryptionService';
 import { AIOrchestrationService } from '../../src/ai/AIOrchestrationService';
 import { MockLLMProvider } from '../mocks/MockLLMProvider';
@@ -109,14 +88,7 @@ async function truncateAll() {
     );
 }
 
-// ─── pg-boss stand-in ─────────────────────────────────────────────────────────
-// See the import comment above for why this is a spy rather than a real
-// PgBoss instance.
-
-const mockSend = jest.fn().mockResolvedValue('fake-job-id');
-
 beforeAll(async () => {
-  setJobQueue({ send: mockSend } as unknown as PgBoss);
   await truncateAll();
 });
 
@@ -251,7 +223,8 @@ describe('Flow 1 — Full Auth Lifecycle', () => {
 //
 // create conversation → send message via MockLLMProvider →
 // verify message encrypted in DB → close conversation →
-// verify memory_extraction job enqueued in pg-boss
+// verify memory extraction actually runs (extractionSweep.ts) and produces
+// a memory
 // ═════════════════════════════════════════════════════════════════════════════
 
 describe('Flow 2 — Conversation Lifecycle', () => {
@@ -262,10 +235,12 @@ describe('Flow 2 — Conversation Lifecycle', () => {
   let messageId:      string;
 
   beforeAll(async () => {
-    // POST /:id/messages calls the orchestrator synchronously in the request
-    // handler (unlike memory extraction, which only runs in a pg-boss worker
-    // this suite never starts) — inject MockLLMProvider so this never hits
-    // the real Anthropic API, per the design rule at the top of this file.
+    // POST /:id/messages calls the orchestrator synchronously in the
+    // request handler; memory extraction (triggered on close, see 2.6
+    // below) also calls it, driven directly rather than through a pg-boss
+    // worker this suite doesn't start — inject MockLLMProvider so neither
+    // path ever hits the real Anthropic API, per the design rule at the
+    // top of this file.
     setOrchestrator(new AIOrchestrationService(new MockLLMProvider()));
 
     const reg    = await register(EMAIL);
@@ -364,15 +339,34 @@ describe('Flow 2 — Conversation Lifecycle', () => {
     expect(res.body.error).toBe('CONVERSATION_NOT_ACTIVE');
   });
 
-  it('2.6 — a memory_extraction job is enqueued after close', async () => {
-    // See the pg-boss import comment near the top of this file — a spy
-    // stands in for the real queue, so this checks the enqueue call the
-    // route handler made rather than a row in pgboss.job.
-    expect(mockSend).toHaveBeenCalledWith(
-      JOB_MEMORY_EXTRACTION,
-      expect.objectContaining({ conversation_id: conversationId }),
-      expect.anything(),
-    );
+  it('2.6 — memory extraction actually runs after close: conversation reaches summarized and a memory exists', async () => {
+    // The PATCH close handler already fired a best-effort sweep tick
+    // (fire-and-forget, so it may or may not have finished yet). Drive one
+    // explicitly here too — safe regardless of whether the background one
+    // already claimed/finished this conversation, since the sweep's claim
+    // is atomic (see extractionSweep.ts) — then poll briefly since this is
+    // still async from the test's perspective.
+    let status: string | undefined;
+    const deadline = Date.now() + 5_000;
+
+    while (Date.now() < deadline) {
+      await runExtractionSweepTick();
+      const [conv] = await db
+        .select({ status: conversations.status })
+        .from(conversations)
+        .where(eq(conversations.id, conversationId));
+      status = conv?.status;
+      if (status === 'summarized') break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+
+    expect(status).toBe('summarized');
+
+    const [memory] = await db
+      .select()
+      .from(memories)
+      .where(eq(memories.conversationId, conversationId));
+    expect(memory).toBeDefined();
   });
 });
 

@@ -3,8 +3,11 @@
  *
  * Tests for runInactivityClose() — the P1-15 inactivity auto-close cron.
  *
- * All database calls and the enqueueExtractionJob helper are mocked so
- * no real Postgres or pg-boss is required.
+ * All database calls are mocked so no real Postgres or pg-boss is required.
+ * runInactivityClose() no longer enqueues extraction itself — closing a
+ * conversation (status='closed') is what the extraction sweep
+ * (extractionSweep.ts) looks for regardless of which path closed it, so
+ * there's nothing here to mock/assert on for that anymore.
  */
 
 // ── Mocks ──────────────────────────────────────────────────────────────────────
@@ -19,16 +22,6 @@ jest.mock('../../db', () => ({
   },
 }));
 
-// Mock enqueueExtractionJob within the same module
-const mockEnqueue = jest.fn().mockResolvedValue(undefined);
-jest.mock('../index', () => {
-  const actual = jest.requireActual('../index');
-  return {
-    ...actual,
-    enqueueExtractionJob: mockEnqueue,
-  };
-});
-
 // ── Imports ────────────────────────────────────────────────────────────────────
 
 import type PgBoss from 'pg-boss';
@@ -36,9 +29,9 @@ import { runInactivityClose, INACTIVITY_THRESHOLD_MS } from '../index';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-/** Creates a fake pg-boss instance (only send() needs to exist for these tests). */
+/** Creates a fake pg-boss instance (unused by runInactivityClose itself now, but still its signature). */
 function makeFakeBoss(): PgBoss {
-  return { send: jest.fn().mockResolvedValue('job-id') } as unknown as PgBoss;
+  return {} as unknown as PgBoss;
 }
 
 /** Sets up db.update to return a successful UPDATE (conversation was closed). */
@@ -150,22 +143,6 @@ describe('runInactivityClose — closing stale conversations', () => {
     expect(mockUpdate).toHaveBeenCalledTimes(2);
   });
 
-  it('enqueues a memory extraction job after closing each conversation', async () => {
-    mockExecute.mockResolvedValue({
-      rows: [{ id: 'conv-idle', user_id: 'user-42' }],
-    });
-    const boss = makeFakeBoss();
-    setupUpdateMock('conv-idle');
-
-    await runInactivityClose(boss);
-
-    expect(mockEnqueue).toHaveBeenCalledTimes(1);
-    expect(mockEnqueue).toHaveBeenCalledWith(
-      boss,
-      { conversation_id: 'conv-idle', user_id: 'user-42' },
-    );
-  });
-
   it('processes multiple stale conversations in a single run', async () => {
     mockExecute.mockResolvedValue({
       rows: [
@@ -189,7 +166,6 @@ describe('runInactivityClose — closing stale conversations', () => {
 
     // T-006: each conversation gets two update calls (close + session_count).
     expect(mockUpdate).toHaveBeenCalledTimes(6);
-    expect(mockEnqueue).toHaveBeenCalledTimes(3);
   });
 
   it('logs an inactivity_close event for each conversation closed', async () => {
@@ -252,16 +228,21 @@ describe('runInactivityClose — closing stale conversations', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('runInactivityClose — race condition handling', () => {
-  it('skips the extraction enqueue when the UPDATE returns no rows (conversation no longer active)', async () => {
+  it('does not count a conversation as closed when the UPDATE returns no rows (conversation no longer active)', async () => {
     mockExecute.mockResolvedValue({
       rows: [{ id: 'conv-raced', user_id: 'user-1' }],
     });
     const boss = makeFakeBoss();
     setupUpdateMock(null); // empty returning = row no longer active
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
 
     await runInactivityClose(boss);
 
-    expect(mockEnqueue).not.toHaveBeenCalled();
+    const logged = logSpy.mock.calls.map((c) => JSON.parse(c[0]));
+    const scan   = logged.find((l) => l.event === 'inactivity_close_scan');
+    expect(scan.closed_count).toBe(0);
+
+    logSpy.mockRestore();
   });
 
   it('logs inactivity_close_skipped when the race is detected', async () => {
@@ -310,14 +291,16 @@ describe('runInactivityClose — error handling', () => {
       }),
     }));
 
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+
     await expect(runInactivityClose(boss)).resolves.not.toThrow();
 
-    // Second conversation should still be processed
-    expect(mockEnqueue).toHaveBeenCalledTimes(1);
-    expect(mockEnqueue).toHaveBeenCalledWith(boss, {
-      conversation_id: 'conv-ok',
-      user_id:         'user-2',
-    });
+    // Second conversation should still be processed and counted as closed.
+    const logged = logSpy.mock.calls.map((c) => JSON.parse(c[0]));
+    const scan   = logged.find((l) => l.event === 'inactivity_close_scan');
+    expect(scan.closed_count).toBe(1);
+
+    logSpy.mockRestore();
   });
 
   it('logs an error when an individual conversation update fails', async () => {
@@ -419,13 +402,15 @@ describe('runInactivityClose — T-006 session_count increment', () => {
       },
     }));
 
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+
     // Must not throw — second conversation should still be processed
     await expect(runInactivityClose(boss)).resolves.not.toThrow();
 
-    // Extraction still enqueued for the second conversation
-    expect(mockEnqueue).toHaveBeenCalledWith(boss, {
-      conversation_id: 'conv-b',
-      user_id:         'user-2',
-    });
+    const logged = logSpy.mock.calls.map((c) => JSON.parse(c[0]));
+    const scan   = logged.find((l) => l.event === 'inactivity_close_scan');
+    expect(scan.closed_count).toBe(2);
+
+    logSpy.mockRestore();
   });
 });
