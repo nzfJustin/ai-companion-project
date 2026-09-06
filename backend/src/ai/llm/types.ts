@@ -27,6 +27,21 @@ export interface SystemBlock {
 
 // ─── Request ──────────────────────────────────────────────────────────────────
 
+/**
+ * A single tool definition for forced structured output — see
+ * CompletionRequest.tool_choice. input_schema is a JSON Schema object
+ * (draft-07-ish subset Anthropic accepts): the API validates the model's
+ * output against it before returning, which is what makes this reliable
+ * where a "return ONLY JSON" prompt instruction is not (a real conversation
+ * history in `messages` reliably makes the model ignore that instruction
+ * and just continue chatting instead — see AIOrchestrationService.complete()).
+ */
+export interface ToolDefinition {
+  name:          string;
+  description?:  string;
+  input_schema:  Record<string, unknown>;
+}
+
 export interface CompletionRequest {
   /** Conversation history — most recent message last */
   messages:    Message[];
@@ -49,6 +64,17 @@ export interface CompletionRequest {
    * Format: "<context>_v<major>.<minor>.<patch>" e.g. "chat_v1.0.0"
    */
   prompt_version?: string;
+
+  /** Tools available for this call. Only meaningful together with tool_choice. */
+  tools?:       ToolDefinition[];
+
+  /**
+   * Forces the model to call the named tool rather than respond with free
+   * text — this is how structured output (e.g. memory extraction) is
+   * obtained reliably. The provider returns the tool's validated input as
+   * a JSON string in CompletionResponse.content.
+   */
+  tool_choice?: { type: 'tool'; name: string };
 }
 
 // ─── Response ─────────────────────────────────────────────────────────────────

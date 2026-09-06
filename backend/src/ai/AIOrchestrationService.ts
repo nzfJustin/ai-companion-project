@@ -26,7 +26,7 @@
  *     not easily abort an async generator mid-iteration here
  */
 
-import type { LLMProvider, CompletionRequest, Message }  from './llm/types';
+import type { LLMProvider, CompletionRequest, Message, ToolDefinition }  from './llm/types';
 import {
   LLMRateLimitError,
   LLMStreamError,
@@ -40,6 +40,51 @@ import { log, warn } from '../lib/logger';
 // Default model name logged with every LLM call.  When the provider
 // abstraction supports multiple models, pass it through CompletionRequest.
 const DEFAULT_LLM_MODEL = 'claude-sonnet-4-6';
+
+// Forces structured output for extraction mode — see complete() below for
+// why a prompt instruction alone ("return ONLY JSON") is not reliable here.
+// Mirrors MemoryExtractionSchema (src/ai/schemas/extraction.ts) exactly;
+// keep the two in sync if that schema changes.
+//
+// An earlier attempt used an assistant-turn prefill (append a `{`-starting
+// assistant message to force continuation as JSON) instead of this — the
+// API rejected it outright for this model: "This model does not support
+// assistant message prefill. The conversation must end with a user
+// message." Tool-use has no such restriction and is the documented way to
+// get validated structured output from Claude, so it's the actual fix.
+const MEMORY_EXTRACTION_TOOL: ToolDefinition = {
+  name: 'record_memory_extraction',
+  description:
+    'Records the structured extraction of a conversation: a title, summary, ' +
+    'key events, the dominant emotion, per-emotion scores, and a sensitivity level.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      title:      { type: 'string', maxLength: 200, description: 'Short descriptive title for this conversation.' },
+      summary:    { type: 'string', maxLength: 5000, description: 'A warm, personal paragraph summarising what was discussed.' },
+      key_events: {
+        type: 'array', maxItems: 10,
+        items: { type: 'string', maxLength: 500 },
+        description: 'Up to 10 short strings describing key moments or topics.',
+      },
+      dominant_emotion: { type: 'string', description: 'Single word — the most prominent emotion in the conversation.' },
+      emotion_scores: {
+        type: 'object',
+        properties: {
+          joy:        { type: 'number', minimum: 0, maximum: 1 },
+          sadness:    { type: 'number', minimum: 0, maximum: 1 },
+          anxiety:    { type: 'number', minimum: 0, maximum: 1 },
+          anger:      { type: 'number', minimum: 0, maximum: 1 },
+          calm:       { type: 'number', minimum: 0, maximum: 1 },
+          excitement: { type: 'number', minimum: 0, maximum: 1 },
+        },
+        required: ['joy', 'sadness', 'anxiety', 'anger', 'calm', 'excitement'],
+      },
+      memory_level: { type: 'integer', minimum: 1, maximum: 5, description: '1=general, 5=highly sensitive.' },
+    },
+    required: ['title', 'summary', 'key_events', 'dominant_emotion', 'emotion_scores', 'memory_level'],
+  },
+};
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -168,10 +213,27 @@ export class AIOrchestrationService {
 
   async complete(req: OrchestrationRequest): Promise<OrchestrationResponse> {
     const { prompt, system } = this.buildPrompt(req);
+
+    // Extraction mode's system prompt says "return ONLY JSON, nothing else"
+    // — but req.messages is a real alternating user/assistant conversation
+    // history, and the model reliably treats that as an invitation to just
+    // continue the conversation, ignoring the JSON-only instruction
+    // (observed non-deterministically in production: sometimes pure chat
+    // prose, sometimes chat prose with JSON appended after it, rarely clean
+    // JSON alone — every shape JSON.parse() rejects). A prompt-only fix
+    // isn't reliable against that; force it with a tool call instead — the
+    // API validates the model's output against MEMORY_EXTRACTION_TOOL's
+    // input_schema before ever returning it, so there is no "did the model
+    // feel like following instructions this time" step left at all.
+    const isExtraction = req.mode === 'extraction';
+
     const llmRequest: CompletionRequest = {
       system,
-      messages:       req.messages,
+      messages: req.messages,
       prompt_version: prompt.version,
+      ...(isExtraction
+        ? { tools: [MEMORY_EXTRACTION_TOOL], tool_choice: { type: 'tool' as const, name: MEMORY_EXTRACTION_TOOL.name } }
+        : {}),
     };
 
     let lastError: unknown;

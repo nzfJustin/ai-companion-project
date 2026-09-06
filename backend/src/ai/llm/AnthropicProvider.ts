@@ -59,12 +59,25 @@ export class AnthropicProvider implements LLMProvider {
         max_tokens: req.max_tokens ?? DEFAULT_MAX_TOKENS,
         messages:   req.messages,
         system:     this.toAnthropicSystem(req.system),
+        ...(req.tools ? { tools: req.tools as Anthropic.Tool[] } : {}),
+        ...(req.tool_choice ? { tool_choice: req.tool_choice } : {}),
       });
 
-      const content = message.content
-        .filter((block): block is Anthropic.TextBlock => block.type === 'text')
-        .map((block) => block.text)
-        .join('');
+      // A forced tool call (req.tool_choice) returns its arguments as a
+      // tool_use content block — already validated by the API against
+      // input_schema — instead of free text. Stringify it back into
+      // `content` so callers expecting a JSON string (e.g. extraction) work
+      // unchanged; a normal (non-tool) call falls through to the text path.
+      const toolUse = message.content.find(
+        (block): block is Anthropic.ToolUseBlock => block.type === 'tool_use',
+      );
+
+      const content = toolUse
+        ? JSON.stringify(toolUse.input)
+        : message.content
+            .filter((block): block is Anthropic.TextBlock => block.type === 'text')
+            .map((block) => block.text)
+            .join('');
 
       return {
         content,
