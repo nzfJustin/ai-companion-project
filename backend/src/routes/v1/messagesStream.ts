@@ -19,12 +19,11 @@ import { eq, sql }        from 'drizzle-orm';
 import type { Response }  from 'express';
 import type PgBoss        from 'pg-boss';
 import { db }             from '../../db';
-import { conversations, messages, userContext, users } from '../../db/schema';
+import { conversations, messages } from '../../db/schema';
 import type { EncryptionService }  from '../../services/EncryptionService';
 import { detectEmotion }           from '../../services/EmotionDetector';
 import { appendToContextCache }    from '../../lib/conversationContextCache';
 import { aiOrchestrationService }  from '../../ai/instance';
-import { enqueueExtractionJob }    from '../../jobs';
 import { LLMTimeoutError }         from '../../ai/llm/errors';
 import { warn }                    from '../../lib/logger';
 import type { Message }            from '../../ai/llm/types';
@@ -91,31 +90,6 @@ export function stripOnboardingSentinel(text: string): { text: string; detected:
   }
   const stripped = text.replace(TRAILING_ONBOARDING_SENTINEL_RE, '').trimEnd();
   return { text: stripped, detected: true };
-}
-
-/**
- * Two onboarding-transition thresholds, both read lazily (not at module-load
- * time) so tests can set the env var overrides per-case:
- *
- *   ONBOARDING_OFFER_MS — 3 min default: offer the user a choice to jump to
- *     chat or keep going (showTransitionOffer).
- *   ONBOARDING_AUTO_MS  — 6 min default: auto-wrap-up without asking, for a
- *     user who declined (or never responded to) the 3-minute offer
- *     (autoTransition). Takes priority over the offer — see
- *     driveOrchestrationStream below.
- *
- * Number.isFinite (not `||`) so an override of '0' is honoured — `0 || default`
- * would silently fall back to the default since 0 is falsy, defeating tests
- * that use ONBOARDING_*_MS_OVERRIDE=0 to force a threshold instantly.
- */
-function onboardingOfferMs(): number {
-  const override = parseInt(process.env.ONBOARDING_OFFER_MS_OVERRIDE ?? '', 10);
-  return Number.isFinite(override) ? override : 3 * 60 * 1_000; // default: 3 minutes
-}
-
-function onboardingAutoMs(): number {
-  const override = parseInt(process.env.ONBOARDING_AUTO_MS_OVERRIDE ?? '', 10);
-  return Number.isFinite(override) ? override : 6 * 60 * 1_000; // default: 6 minutes
 }
 
 /**
@@ -235,15 +209,16 @@ export interface DriveStreamParams {
   userMessageContent?: string;
   /** Pre-constructed for the requesting user — encryption key derivation is per-user. */
   encryptionService: EncryptionService;
-  /** When the conversation was created — used to compute the 3-min onboarding
-   *  threshold. Omit to skip the transition-offer check entirely. */
+  /** Vestigial — was used to compute the 3-min onboarding transition-offer
+   *  threshold. The onboarding feature has been removed; driveOrchestrationStream()
+   *  no longer reads this. Kept optional here only because conversations.router.ts's
+   *  call site still passes it. */
   conversationStartedAt?: Date;
-  /** True if the user has already completed onboarding — skips the transition
-   *  offer. Defaults to true (no offer) when omitted. */
+  /** Vestigial — see conversationStartedAt above. */
   onboardingDone?: boolean;
-  /** pg-boss instance — needed to enqueue extraction when the transition
-   *  closes the conversation. Omit/null to skip enqueueing (e.g. queue not
-   *  yet started). */
+  /** Vestigial — was used to enqueue extraction when the onboarding transition
+   *  closed the conversation server-side. That path was removed along with
+   *  onboarding; driveOrchestrationStream() no longer reads this. */
   jobQueue?: PgBoss | null;
 }
 
@@ -258,31 +233,12 @@ export async function driveOrchestrationStream(params: DriveStreamParams): Promi
   const {
     session, conversationId, userId, contextMessages,
     userProfile, encryptionService,
-    conversationStartedAt, onboardingDone = true, jobQueue = null,
   } = params;
 
   const userMessageContent =
     params.userMessageContent
     ?? [...contextMessages].reverse().find((m) => m.role === 'user')?.content
     ?? '';
-
-  // ── Onboarding transition thresholds ──────────────────────────────────────
-  // Two thresholds, mutually exclusive (auto takes priority over offer):
-  //   < 3 min  → normal onboarding, no transition block
-  //   3–6 min  → offer the user a choice (showTransitionOffer)
-  //   6 min+   → auto-wrap-up, no choice offered (autoTransition) — covers a
-  //              user who declined (or never responded to) the 3-min offer
-  // Uses >= rather than > — with an override of 0 (used by tests to force a
-  // threshold immediately) a fast round-trip can leave elapsed time at
-  // exactly 0ms, and `0 > 0` would wrongly skip it.
-  const elapsed = conversationStartedAt !== undefined
-    ? Date.now() - conversationStartedAt.getTime()
-    : undefined;
-  const autoTransition =
-    !onboardingDone && elapsed !== undefined && elapsed >= onboardingAutoMs();
-  const showTransitionOffer =
-    !onboardingDone && !autoTransition &&
-    elapsed !== undefined && elapsed >= onboardingOfferMs();
 
   let rawAccumulated = '';  // full LLM output, may contain a sentinel at end
   // Holds only the portion of the tail that could still be the start of an
@@ -294,13 +250,6 @@ export async function driveOrchestrationStream(params: DriveStreamParams): Promi
       mode:        'chat',
       messages:    contextMessages,
       userProfile,
-      // Pass the relevant transition flag so the prompt builder can inject
-      // the right block — at most one of these is ever true.
-      promptOpts: autoTransition
-        ? { autoTransition: true }
-        : showTransitionOffer
-          ? { showTransitionOffer: true }
-          : undefined,
     });
 
     // Pull tokens one at a time, racing each pull against the gap timeout.
@@ -337,14 +286,13 @@ export async function driveOrchestrationStream(params: DriveStreamParams): Promi
     // sentinel, or (per stripOnboardingSentinel's own "both at the end" case)
     // both. Stripping only one here would leak the other straight to the
     // live client, even though it's later stripped from the persisted text.
-    const { text: bufferAfterCrisis, detected: crisisInBuffer }     = stripCrisisSentinel(pendingBuffer);
-    const { text: cleanBuffer,       detected: onboardingInBuffer } = stripOnboardingSentinel(bufferAfterCrisis);
+    const { text: bufferAfterCrisis, detected: crisisInBuffer } = stripCrisisSentinel(pendingBuffer);
+    const { text: cleanBuffer }                                 = stripOnboardingSentinel(bufferAfterCrisis);
     if (cleanBuffer) session.pushToken(cleanBuffer);
 
     // ── Strip both sentinels from the full accumulated response ─────────────
-    const { text: afterCrisis,      detected: crisisDetected }      = stripCrisisSentinel(rawAccumulated);
-    const { text: cleanAccumulated, detected: onboardingComplete }  = stripOnboardingSentinel(afterCrisis);
-    void onboardingInBuffer; // computed for symmetry/clarity; onboardingComplete (above) is authoritative
+    const { text: afterCrisis,      detected: crisisDetected } = stripCrisisSentinel(rawAccumulated);
+    const { text: cleanAccumulated }                            = stripOnboardingSentinel(afterCrisis);
 
     if (crisisDetected || crisisInBuffer) {
       warn({
@@ -385,46 +333,11 @@ export async function driveOrchestrationStream(params: DriveStreamParams): Promi
     // never contains the internal monitoring string.
     void appendToContextCache(conversationId, { role: 'assistant', content: cleanAccumulated });
 
-    // ── Onboarding transition: close the conversation server-side ──────────
-    // When the user confirmed "jump to chat", close the onboarding conversation
-    // immediately so the extraction job runs and memory is built from the
-    // onboarding exchange. The frontend receives onboarding_complete: true in
-    // the done event and navigates to /chat.
-    if (onboardingComplete) {
-      warn({
-        event:           'onboarding_transition',
-        conversation_id: conversationId,
-        user_id:         userId,
-      });
-
-      // Close the conversation and enqueue extraction — same logic as PATCH /:id close
-      await db.transaction(async (tx) => {
-        await tx
-          .update(conversations)
-          .set({ status: 'closed', endedAt: new Date() })
-          .where(eq(conversations.id, conversationId));
-
-        await tx
-          .update(userContext)
-          .set({ sessionCount: sql`${userContext.sessionCount} + 1` })
-          .where(eq(userContext.userId, userId));
-
-        await tx
-          .update(users)
-          .set({ onboardingDone: true })
-          .where(eq(users.id, userId));
-      });
-
-      if (jobQueue) {
-        await enqueueExtractionJob(jobQueue, { conversation_id: conversationId, user_id: userId });
-      }
-    }
-
     const doneMeta: DoneMeta = {
       messageId:   assistantMsg.id,
       emotionTags: emotionTag,
-      ...(onboardingComplete ? { onboardingComplete: true } : {}),
     };
+
     session.finishDone(doneMeta);
   } catch (err) {
     // Mid-stream failure (LLMStreamError re-thrown by the orchestrator),

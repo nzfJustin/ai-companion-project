@@ -92,7 +92,7 @@ describe('GET /v1/users/me (integration)', () => {
       display_name:    'Users Me Tester',
       timezone:        'UTC',
       comm_style:      'warm',
-      onboarding_done: false,
+      onboarding_done: true,
     });
     expect(res.body.created_at).toBeTruthy();
   });
@@ -185,17 +185,20 @@ describe('PATCH /v1/users/me (integration)', () => {
   it('cannot set onboarding_done directly', async () => {
     const token = await registerAndLogin();
 
+    // Registration now sets onboarding_done: true by default (onboarding
+    // feature removed) — attempt to flip it to false via PATCH to prove the
+    // field is still immutable through this endpoint either direction.
     const res = await request(app)
       .patch('/v1/users/me')
       .set('Authorization', `Bearer ${token}`)
-      .send({ onboarding_done: true });
+      .send({ onboarding_done: false });
 
     expect(res.status).toBe(200);
-    expect(res.body.onboarding_done).toBe(false);
+    expect(res.body.onboarding_done).toBe(true);
 
     const userId = await getUserId();
     const dbUser = await db.query.users.findFirst({ where: eq(users.id, userId) });
-    expect(dbUser!.onboardingDone).toBe(false);
+    expect(dbUser!.onboardingDone).toBe(true);
   });
 
   it('returns 401 with no token', async () => {

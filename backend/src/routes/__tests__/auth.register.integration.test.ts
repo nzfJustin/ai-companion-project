@@ -110,7 +110,7 @@ describe('POST /v1/auth/register (integration)', () => {
     expect(res.status).toBe(409);
   });
 
-  it('sets onboarding_done to false by default', async () => {
+  it('sets onboarding_done to true by default (onboarding feature removed — users go straight to chat)', async () => {
     await request(app).post('/v1/auth/register').send(VALID_BODY);
 
     const saved = await db.query.users.findFirst({
@@ -118,7 +118,7 @@ describe('POST /v1/auth/register (integration)', () => {
       columns: { onboardingDone: true },
     });
 
-    expect(saved!.onboardingDone).toBe(false);
+    expect(saved!.onboardingDone).toBe(true);
   });
 
   // ── TDD P1-005: user_context seeded atomically with the user ────────────────

@@ -91,7 +91,7 @@ authRouter.post(
       const user = await db.transaction(async (tx) => {
         const [inserted] = await tx
           .insert(users)
-          .values({ email, passwordHash, displayName: display_name })
+          .values({ email, passwordHash, displayName: display_name, onboardingDone: true })
           .returning({ id: users.id, displayName: users.displayName });
 
         await tx.insert(userContext).values({ userId: inserted.id });

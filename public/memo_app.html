@@ -196,8 +196,7 @@ async function doRegister(name, email, pwd) {
 
 async function afterAuth() {
   if (!S.user) { S.screen = 'login'; render(); return; }
-  if (!S.user.onboarding_done) { S.screen = 'onboarding'; await loadOrCreateConv(); render(); startOnboardingPoll(); }
-  else { S.screen = 'main'; S.nav = 'chat'; await loadOrCreateConv(); render(); }
+  S.screen = 'main'; S.nav = 'chat'; await loadOrCreateConv(); render();
 }
 
 async function loadUser() {
@@ -254,16 +253,6 @@ async function doSend(content) {
       if (refreshed) { doSend(content); return; }
       S.token = null; save(); go('login'); return;
     }
-    // 409 during onboarding = backend closed the conversation via sentinel
-    if (res.status === 409 && S.screen === 'onboarding') {
-      S.msgs.pop(); S.msgs.pop(); S.streaming = false; syncSendBtn();
-      S.convId = null;
-      showToast('Onboarding complete! Taking you to the app...');
-      await loadUser();
-      await loadOrCreateConv();
-      setTimeout(() => { S.screen = 'main'; S.nav = 'chat'; render(); }, 1000);
-      return;
-    }
     if (!res.ok || !res.body) {
       patchMsg(aid, { content: 'Something went wrong. Try again.', typing: false });
       S.streaming = false; syncSendBtn(); return;
@@ -286,17 +275,6 @@ async function doSend(content) {
               patchMsg(aid, { typing: false, emotion: data.emotion_tags });
               S.streaming = false;
               syncSendBtn();
-              if (S.screen === 'onboarding') {
-                if (data.onboardingComplete) {
-                  // Backend confirmed sentinel — transition immediately
-                  stopOnboardingPoll();
-                  S.convId = null;
-                  showToast('Onboarding complete! Taking you to the app...');
-                  setTimeout(async () => { S.screen = 'main'; S.nav = 'chat'; await loadOrCreateConv(); render(); }, 1000);
-                } else {
-                  checkOnboarding();
-                }
-              }
             } else if (evType === 'error') {
               const txt = data.code === 'LLM_TIMEOUT' ? "I'm having a quiet moment — could you share that again?" : 'Something went wrong.';
               patchMsg(aid, { content: txt, typing: false }); S.streaming = false; syncSendBtn();
@@ -307,32 +285,6 @@ async function doSend(content) {
       }
     }
   } catch(e) { patchMsg(aid, { content: 'Connection lost. Please try again.', typing: false }); S.streaming = false; syncSendBtn(); }
-}
-
-async function checkOnboarding() {
-  await loadUser();
-  if (S.user && S.user.onboarding_done) {
-    stopOnboardingPoll();
-    showToast('Onboarding complete! Taking you to the app...');
-    setTimeout(async () => {
-      S.convId = null;
-      S.screen = 'main'; S.nav = 'chat';
-      await loadOrCreateConv(); render();
-    }, 1200);
-  }
-}
-
-// Background poll every 20s during onboarding for server-side completion
-var _onboardingPollTimer = null;
-function startOnboardingPoll() {
-  stopOnboardingPoll();
-  _onboardingPollTimer = setInterval(async () => {
-    if (S.screen !== 'onboarding') { stopOnboardingPoll(); return; }
-    await checkOnboarding();
-  }, 20000);
-}
-function stopOnboardingPoll() {
-  if (_onboardingPollTimer) { clearInterval(_onboardingPollTimer); _onboardingPollTimer = null; }
 }
 
 function appendMsg(id, delta) {
@@ -441,7 +393,7 @@ function msgsHTML() {
   }
   if (!S.msgs.length) {
     const n = ((S.user && S.user.display_name) || '').split(' ')[0] || 'there';
-    const sub = S.screen === 'onboarding' ? 'Tell me about yourself — your goals, how you\'re feeling.' : 'What\'s on your mind today?';
+    const sub = 'What\'s on your mind today?';
     return '<div class="empty"><div class="empty-icon">\u2726</div><div class="empty-h">Hey ' + esc(n) + '</div><div class="empty-s">' + sub + '</div></div>';
   }
   return S.msgs.map(function(m) {
@@ -489,10 +441,6 @@ var screens = {
       '<div><label>Password</label><input id="rp" type="password" placeholder="Min 8 characters" autocomplete="new-password" /></div>' +
       '<button class="btn-p" onclick="onRegister()" ' + (S.loading?'disabled':'') + '>' + (S.loading?'Creating account\u2026':'Create account') + '</button>' +
       '<div style="text-align:center;margin-top:4px"><button class="lnk" onclick="go(\'login\')">Already have an account? Sign in</button></div></div></div>';
-  },
-  onboarding: function() {
-    return '<div class="topbar"><div><div class="topbar-t">Getting to know you</div><div class="topbar-s">This personalises your experience</div></div></div>' +
-      '<div class="chat-body">' + msgsHTML() + '</div>' + chatInput('Tell me about yourself\u2026');
   },
   main: function() {
     if (S.nav === 'memories') return mainMemories();
@@ -558,7 +506,6 @@ function mainSettings() {
     '<div class="sec-head">Preferences</div>' +
     '<div class="srow"><span class="srow-lbl">Communication style</span><select class="inline" onchange="doUpdateProfile({comm_style:this.value})"><option value="warm" ' + (u.comm_style==='warm'?'selected':'') + '>Warm</option><option value="direct" ' + (u.comm_style==='direct'?'selected':'') + '>Direct</option><option value="reflective" ' + (u.comm_style==='reflective'?'selected':'') + '>Reflective</option></select></div>' +
     '<div class="srow"><span class="srow-lbl">Timezone</span><span class="srow-val">' + esc(u.timezone||'Not set') + '</span></div>' +
-    '<div class="srow"><span class="srow-lbl">Onboarding</span><span class="srow-val">' + (u.onboarding_done ? '\u2713 Complete' : 'Pending') + '</span></div>' +
     '<div class="sec-head">App</div>' +
     '<div class="srow"><span class="srow-lbl">Backend URL</span><span class="srow-val" style="font-size:11px;font-family:monospace;max-width:170px;overflow:hidden;text-overflow:ellipsis">' + esc(S.cfg.url) + '</span></div>' +
     '<div class="srow danger" onclick="doLogout()"><span class="srow-lbl">Sign out</span><span style="color:var(--txt3);font-size:16px">\u2192</span></div>' +
@@ -569,7 +516,7 @@ function render() {
   var root = document.getElementById('root');
   var fn = screens[S.screen];
   root.innerHTML = fn ? fn() : '';
-  if ((S.screen === 'main' && S.nav === 'chat') || S.screen === 'onboarding') scrollChat();
+  if (S.screen === 'main' && S.nav === 'chat') scrollChat();
 }
 
 function onSetup() {
@@ -600,7 +547,7 @@ function onKey(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); 
 function autoH(el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 120) + 'px'; }
 function backMem() { S.screen = 'main'; S.nav = 'memories'; S.memDetail = null; render(); }
 
-Object.assign(window, { go, onSetup, onLogin, onRegister, onSend, onKey, autoH, switchNav, openMemory, backMem, doCloseConv, doLogout, loadMemories, loadTrends, doUpdateProfile, startOnboardingPoll, stopOnboardingPoll });
+Object.assign(window, { go, onSetup, onLogin, onRegister, onSend, onKey, autoH, switchNav, openMemory, backMem, doCloseConv, doLogout, loadMemories, loadTrends, doUpdateProfile });
 
 async function boot() {
   load();
