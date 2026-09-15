@@ -3,18 +3,18 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Memo · AI Companion</title>
+<title>Ami · AI Companion</title>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-html, body { height: 100%; background: #0B0C17; }
-body { display: flex; justify-content: center; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #E8E5FF; }
-#root { width: 100%; max-width: 430px; min-height: 100vh; display: flex; flex-direction: column; background: #0B0C17; position: relative; overflow: hidden; }
+html, body { height: 100%; background: #FFFFFF; }
+body { display: flex; justify-content: center; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #1A1A18; }
+#root { width: 100%; max-width: 430px; min-height: 100vh; display: flex; flex-direction: column; background: #FFFFFF; position: relative; overflow: hidden; }
 :root {
-  --bg: #0B0C17; --s1: #13152A; --s2: #1B1E36; --s3: #232643;
-  --acc: #7C6CF0; --acc2: #5A4DD6; --acc-s: rgba(124,108,240,0.12); --acc-b: rgba(124,108,240,0.28);
-  --txt: #E8E5FF; --txt2: #9B98C8; --txt3: #56547A;
-  --bdr: rgba(255,255,255,0.07); --bdr2: rgba(255,255,255,0.13);
-  --grn: #34D399; --red: #F87171; --rad: 12px;
+  --bg: #FFFFFF; --s1: #F7F7F5; --s2: #F0F0ED; --s3: #E8E8E4;
+  --acc: #7C6CF0; --acc2: #5A4DD6; --acc-s: rgba(124,108,240,0.10); --acc-b: rgba(124,108,240,0.28);
+  --txt: #1A1A18; --txt2: #6B6B67; --txt3: #9C9C97;
+  --bdr: rgba(0,0,0,0.08); --bdr2: rgba(0,0,0,0.14);
+  --grn: #34D399; --red: #E5484D; --rad: 12px;
 }
 .screen { flex: 1; display: flex; flex-direction: column; overflow-y: auto; overflow-x: hidden; min-height: 0; }
 .center { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; padding: 40px 28px; gap: 28px; }
@@ -35,7 +35,7 @@ input::placeholder { color: var(--txt3); }
 .lnk { background: none; border: none; color: var(--acc); font-size: 13px; cursor: pointer; padding: 0; }
 .divider { display: flex; align-items: center; gap: 10px; color: var(--txt3); font-size: 12px; }
 .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: var(--bdr); }
-.err { background: rgba(248,113,113,.1); border: 1px solid rgba(248,113,113,.25); border-radius: 8px; padding: 10px 14px; font-size: 13px; color: var(--red); line-height: 1.4; }
+.err { background: rgba(229,72,77,.08); border: 1px solid rgba(229,72,77,.22); border-radius: 8px; padding: 10px 14px; font-size: 13px; color: var(--red); line-height: 1.4; }
 .topbar { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px 12px; border-bottom: 1px solid var(--bdr); background: var(--bg); position: sticky; top: 0; z-index: 10; flex-shrink: 0; }
 .topbar-t { font-size: 16px; font-weight: 600; }
 .topbar-s { font-size: 11px; color: var(--txt3); margin-top: 2px; }
@@ -95,9 +95,9 @@ input::placeholder { color: var(--txt3); }
 .srow + .srow { margin-top: 2px; }
 .srow-lbl { font-size: 14px; color: var(--txt); }
 .srow-val { font-size: 13px; color: var(--txt3); }
-.srow.danger { border-color: rgba(248,113,113,0.2); cursor: pointer; }
+.srow.danger { border-color: rgba(229,72,77,0.2); cursor: pointer; }
 .srow.danger .srow-lbl { color: var(--red); }
-.srow.danger:hover { background: rgba(248,113,113,0.06); }
+.srow.danger:hover { background: rgba(229,72,77,0.06); }
 select.inline { background: var(--s2); border: 1px solid var(--bdr2); border-radius: 6px; color: var(--txt); padding: 5px 10px; font-size: 13px; outline: none; cursor: pointer; }
 .empty { text-align: center; padding: 56px 28px; }
 .empty-icon { font-size: 40px; margin-bottom: 14px; }
@@ -418,14 +418,14 @@ var EMO_C = { joy:'#FBBF24', calm:'#34D399', sadness:'#60A5FA', anxiety:'#A78BFA
 var screens = {
   loading: function() { return '<div class="screen center"><div class="spin" style="width:34px;height:34px;border-width:3px"></div></div>'; },
   setup: function() {
-    return '<div class="screen center"><div style="text-align:center"><div class="logo">me<em>mo</em></div><div class="tagline">Your AI memory companion</div></div><div class="form">' +
+    return '<div class="screen center"><div style="text-align:center"><div class="logo">am<em>i</em></div><div class="tagline">Your AI memory companion</div></div><div class="form">' +
       (S.error ? '<div class="err">' + esc(S.error) + '</div>' : '') +
       '<div><label>Backend URL</label><input id="cfg-url" type="url" placeholder="https://your-app.railway.app" value="' + esc(S.cfg.url) + '" /></div>' +
       '<div style="font-size:12px;color:var(--txt3);line-height:1.6">Enter your Railway backend URL.</div>' +
       '<button class="btn-p" onclick="onSetup()">Continue \u2192</button></div></div>';
   },
   login: function() {
-    return '<div class="screen center"><div style="text-align:center"><div class="logo">me<em>mo</em></div><div class="tagline">Sign in to continue</div></div><div class="form">' +
+    return '<div class="screen center"><div style="text-align:center"><div class="logo">am<em>i</em></div><div class="tagline">Sign in to continue</div></div><div class="form">' +
       (S.error ? '<div class="err">' + esc(S.error) + '</div>' : '') +
       '<div><label>Email</label><input id="le" type="email" placeholder="you@example.com" autocomplete="email" onkeydown="if(event.key===\'Enter\')onLogin()" /></div>' +
       '<div><label>Password</label><input id="lp" type="password" placeholder="\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" autocomplete="current-password" onkeydown="if(event.key===\'Enter\')onLogin()" /></div>' +
@@ -434,7 +434,7 @@ var screens = {
       '<div style="text-align:center;margin-top:4px"><button class="lnk" onclick="go(\'setup\')">Change backend URL</button></div></div></div>';
   },
   register: function() {
-    return '<div class="screen center"><div style="text-align:center"><div class="logo">me<em>mo</em></div><div class="tagline">Create your account</div></div><div class="form">' +
+    return '<div class="screen center"><div style="text-align:center"><div class="logo">am<em>i</em></div><div class="tagline">Create your account</div></div><div class="form">' +
       (S.error ? '<div class="err">' + esc(S.error) + '</div>' : '') +
       '<div><label>Display name</label><input id="rn" type="text" placeholder="Your name" autocomplete="name" /></div>' +
       '<div><label>Email</label><input id="re" type="email" placeholder="you@example.com" autocomplete="email" /></div>' +
@@ -447,7 +447,7 @@ var screens = {
     if (S.nav === 'trends') return mainTrends();
     if (S.nav === 'settings') return mainSettings();
     var endBtn = S.sessionJustEnded ? '' : '<button class="ico-btn" title="End session" onclick="doCloseConv()">\u2715 End</button>';
-    return '<div class="topbar"><div class="topbar-t" style="font-size:20px;font-weight:700;letter-spacing:-0.03em">me<span style="color:var(--acc)">mo</span></div>' + endBtn + '</div>' +
+    return '<div class="topbar"><div class="topbar-t" style="font-size:20px;font-weight:700;letter-spacing:-0.03em">am<span style="color:var(--acc)">i</span></div>' + endBtn + '</div>' +
       '<div class="chat-body">' + msgsHTML() + '</div>' +
       (!S.sessionJustEnded ? chatInput('What\'s on your mind?') : '') +
       bnavHTML();
@@ -507,7 +507,6 @@ function mainSettings() {
     '<div class="srow"><span class="srow-lbl">Communication style</span><select class="inline" onchange="doUpdateProfile({comm_style:this.value})"><option value="warm" ' + (u.comm_style==='warm'?'selected':'') + '>Warm</option><option value="direct" ' + (u.comm_style==='direct'?'selected':'') + '>Direct</option><option value="reflective" ' + (u.comm_style==='reflective'?'selected':'') + '>Reflective</option></select></div>' +
     '<div class="srow"><span class="srow-lbl">Timezone</span><span class="srow-val">' + esc(u.timezone||'Not set') + '</span></div>' +
     '<div class="sec-head">App</div>' +
-    '<div class="srow"><span class="srow-lbl">Backend URL</span><span class="srow-val" style="font-size:11px;font-family:monospace;max-width:170px;overflow:hidden;text-overflow:ellipsis">' + esc(S.cfg.url) + '</span></div>' +
     '<div class="srow danger" onclick="doLogout()"><span class="srow-lbl">Sign out</span><span style="color:var(--txt3);font-size:16px">\u2192</span></div>' +
     '</div>' + bnavHTML();
 }
