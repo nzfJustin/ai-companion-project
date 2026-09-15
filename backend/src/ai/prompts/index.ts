@@ -156,7 +156,12 @@ asks for more or the emotional weight of the moment calls for it.\
 // ─── Comm-style tone descriptors ──────────────────────────────────────────────
 
 const COMM_STYLE_DESCRIPTOR: Record<PromptContext['comm_style'], string> = {
-  warm:       'warm, empathetic, and emotionally expressive',
+  // Originally just "warm, empathetic, and emotionally expressive" — that
+  // was vague enough that it consistently produced clichéd therapy-speak
+  // ("that sounds like a lot to carry", "that's so real") rather than
+  // genuine warmth. Spelling out what NOT to do is what actually changes
+  // the output; the vague adjective alone didn't.
+  warm:       'warm and empathetic, but not performative — skip stock openers like "that sounds like a lot" or "that\'s so real," don\'t validate every single sentence, and respond like an attentive friend: specific and curious, not effusive',
   direct:     'clear, direct, and concise — supportive but not effusive',
   reflective: 'thoughtful and reflective — you often mirror language back and invite deeper exploration',
 };
@@ -164,7 +169,7 @@ const COMM_STYLE_DESCRIPTOR: Record<PromptContext['comm_style'], string> = {
 // ─── Chat prompt (standard, post-onboarding) ──────────────────────────────────
 
 export const CHAT_PROMPT: VersionedPrompt = {
-  version: 'chat_v1.1.0',
+  version: 'chat_v1.1.1',
 
   system(ctx: PromptContext): string {
     // Sanitize all user-supplied strings before interpolation.
@@ -367,8 +372,8 @@ You are a memory extraction system. Analyze the conversation and return ONLY val
 Required JSON structure:
 {
   "title": "Short descriptive title for this conversation (max 200 chars)",
-  "summary": "A warm, personal paragraph summarising what was discussed (max 5000 chars)",
-  "key_events": ["Up to 10 short strings describing key moments or topics"],
+  "summary": "A warm, personal paragraph summarising what was discussed, written in first person as if the user is reflecting on their own conversation (max 5000 chars)",
+  "key_events": ["Up to 10 short strings describing key moments or topics, written in first person"],
   "dominant_emotion": "Single word — the most prominent emotion in the conversation",
   "emotion_scores": {
     "joy": 0.0,
@@ -385,10 +390,11 @@ Rules:
 - emotion_scores values must be floats between 0.0 and 1.0 and sum to approximately 1.0
 - memory_level must be an integer 1-5 (1=general, 5=highly sensitive)
 - dominant_emotion must be a single lowercase word with no punctuation
+- Write "summary" and "key_events" in first person ("I felt...", "I talked about...") — never third person ("the user", "they") and never by name. This is the user reading back their own memory, not a case note written about them.
 - Return ONLY the JSON object, nothing else`;
 
 export const MEMORY_EXTRACTION_PROMPT: VersionedPrompt = {
-  version: 'memory_extraction_v1.0.0',
+  version: 'memory_extraction_v1.0.1',
   system:  (_ctx: PromptContext) => MEMORY_EXTRACTION_SYSTEM,
 };
 
