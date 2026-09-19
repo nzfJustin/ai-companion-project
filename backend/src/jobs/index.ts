@@ -3,7 +3,7 @@
  *
  * pg-boss job queue — one worker:
  *
- *   inactivity_close — runs on a 5-minute cron, finds all conversations with
+ *   inactivity_close — runs on a 15-minute cron, finds all conversations with
  *                       status="active" and no activity in the past 30
  *                       minutes, closes them automatically (P1-15
  *                       criterion 4).
@@ -31,7 +31,15 @@ export const JOB_INACTIVITY_CLOSE = 'inactivity_close';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const INACTIVITY_CRON = '*/5 * * * *';
+// Originally every 5 minutes. Combined with extractionSweep.ts's own
+// polling, this kept Postgres from ever going idle long enough for
+// Neon's serverless compute to auto-suspend, so it was billed as
+// continuously running instead of scaling to zero between real user
+// sessions — see extractionSweep.ts's SWEEP_INTERVAL_MS comment for the
+// full story. This cron only auto-closes conversations idle 30+ minutes
+// (INACTIVITY_THRESHOLD_MS below); checking every 15 rather than every 5
+// minutes has no meaningful effect on that.
+const INACTIVITY_CRON = '*/15 * * * *';
 export const INACTIVITY_THRESHOLD_MS = 30 * 60 * 1000; // 30 minutes
 
 // ─────────────────────────────────────────────────────────────────────────────

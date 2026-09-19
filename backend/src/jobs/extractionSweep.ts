@@ -36,7 +36,17 @@ import { log, warn, logError } from '../lib/logger';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-export const SWEEP_INTERVAL_MS      = 20_000;      // 20 seconds
+// Originally 20 seconds. That polled Postgres roughly 4,300 times/day
+// regardless of real activity — well inside Neon's ~5-minute autosuspend
+// window, so the compute could never actually scale to zero and was
+// billed as continuously running. This is only a backstop for the rare
+// case where the real-user-triggered immediate kick (see
+// conversations.router.ts's PATCH close handler) is lost — normal
+// extraction latency is unaffected by this value. 10 minutes gives Neon
+// a real window to suspend between ticks while keeping the backstop's
+// worst case (this plus STUCK_CLAIM_MS below, for a conversation whose
+// extraction also crashed mid-run) well under half an hour.
+export const SWEEP_INTERVAL_MS      = 10 * 60_000;  // 10 minutes
 export const STUCK_CLAIM_MS         = 5 * 60_000;   // 5 minutes
 export const MAX_EXTRACTION_ATTEMPTS = 3;
 const BATCH_SIZE = 10;
