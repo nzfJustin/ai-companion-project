@@ -5,13 +5,20 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Ami · AI Companion</title>
 <style>
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
 html, body { height: 100%; background: #FFFFFF; }
 body { display: flex; justify-content: center; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #1A1A18; }
 #root { width: 100%; max-width: 430px; min-height: 100vh; display: flex; flex-direction: column; background: #FFFFFF; position: relative; overflow: hidden; }
 /* Keep content clear of the notch / Dynamic Island and home indicator in the
    iOS app (viewport-fit=cover). env() is 0 in normal browsers. */
 #root { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+html, body { overscroll-behavior: none; }
+/* iOS keyboard open: the input bar sits right on the keyboard, so drop the
+   tab bar and the home-indicator padding (class set by the Keyboard plugin). */
+body.kb .bnav { display: none; }
+body.kb #root { padding-bottom: 0; }
+.srow input[type=time] { background: var(--s2); border: 1px solid var(--bdr2); border-radius: 8px; padding: 6px 8px; font-size: 14px; color: var(--txt); font-family: inherit; }
+.srow input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--acc); }
 :root {
   --bg: #FFFFFF; --s1: #F7F7F5; --s2: #F0F0ED; --s3: #E8E8E4;
   --acc: #7C6CF0; --acc2: #5A4DD6; --acc-s: rgba(124,108,240,0.10); --acc-b: rgba(124,108,240,0.28);
@@ -167,6 +174,79 @@ const RT_KEY = 'ami_refresh_token';
 const isNative = () => !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 const showSetupLink = () => !isNative() && /[?&]setup(=|&|$)/.test(window.location.search);
 const secureStore = () => window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.SecureStoragePlugin;
+const plugin = name => (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins[name]) || null;
+
+// ── Native touches (#64) ─────────────────────────────────────────────────
+// Light haptic tap on send and when Ami's reply finishes. No-op on the web.
+function haptic() {
+  if (!isNative()) return;
+  try { const h = plugin('Haptics'); if (h) h.impact({ style: 'LIGHT' }); } catch(e) {}
+}
+
+// Opt-in daily check-in reminder, scheduled on-device with local
+// notifications (no backend involved). Preference is per device.
+const REMINDER_KEY = 'ami_reminder', REMINDER_ID = 1;
+function reminderPref() {
+  try { return Object.assign({ on: false, time: '20:00' }, JSON.parse(localStorage.getItem(REMINDER_KEY) || '{}')); }
+  catch(e) { return { on: false, time: '20:00' }; }
+}
+function saveReminderPref(p) { try { localStorage.setItem(REMINDER_KEY, JSON.stringify(p)); } catch(e) {} }
+async function setReminder(on, time) {
+  const ln = plugin('LocalNotifications');
+  if (!ln) return;
+  const pref = reminderPref();
+  if (time) pref.time = time;
+  try {
+    await ln.cancel({ notifications: [{ id: REMINDER_ID }] });
+    if (on) {
+      const perm = await ln.requestPermissions();
+      if (perm.display !== 'granted') {
+        pref.on = false; saveReminderPref(pref); render();
+        showToast('Turn on notifications for Ami in iOS Settings first.');
+        return;
+      }
+      const [hour, minute] = pref.time.split(':').map(Number);
+      await ln.schedule({ notifications: [{
+        id: REMINDER_ID, title: 'Ami',
+        body: "How was your day? I'm here if you'd like to talk.",
+        schedule: { on: { hour, minute }, allowWhileIdle: true },
+      }] });
+    }
+    pref.on = !!on; saveReminderPref(pref);
+    showToast(on ? 'Daily reminder set for ' + pref.time : 'Daily reminder off');
+  } catch(e) { showToast('Could not update the reminder.'); }
+  render();
+}
+async function clearReminder() {
+  const ln = plugin('LocalNotifications');
+  if (ln) { try { await ln.cancel({ notifications: [{ id: REMINDER_ID }] }); } catch(e) {} }
+  try { localStorage.removeItem(REMINDER_KEY); } catch(e) {}
+}
+
+// Keyboard + app lifecycle hooks (native only).
+function initNative() {
+  if (!isNative()) return;
+  const kb = plugin('Keyboard'), app = plugin('App');
+  if (kb) {
+    kb.addListener('keyboardWillShow', () => { document.body.classList.add('kb'); scrollChat(); });
+    kb.addListener('keyboardWillHide', () => document.body.classList.remove('kb'));
+    // iOS has no "Done" key on this keyboard: tapping the conversation
+    // dismisses it, like Messages.
+    document.addEventListener('click', e => {
+      const a = document.activeElement;
+      if (a && a.id === 'ci' && e.target.closest && e.target.closest('.chat-body')) a.blur();
+    });
+  }
+  // Coming back to the foreground: a reply may have finished (or the stream
+  // been cut) while the app was suspended, so re-sync the open conversation.
+  if (app) app.addListener('resume', () => { refreshConv(); });
+}
+async function refreshConv() {
+  if (S.streaming || S.screen !== 'main' || !S.convId) return;
+  await loadConvMessages(S.convId);
+  if (S.nav === 'chat' && !S.sessionJustEnded) renderMsgs();
+}
+
 async function rtGet() {
   try { const r = await secureStore().get({ key: RT_KEY }); return (r && r.value) || null; } catch(e) { return null; }
 }
@@ -287,6 +367,7 @@ async function doSend(content) {
   S.streaming = true;
   syncSendBtn();
   const uid = 'u' + Date.now(), aid = 'a' + Date.now();
+  haptic();
   S.msgs.push({ role: 'user', content, id: uid });
   S.msgs.push({ role: 'ai', content: '', id: aid, typing: true });
   renderMsgs(); scrollChat();
@@ -323,6 +404,7 @@ async function doSend(content) {
             if (evType === 'token' && data.delta) { appendMsg(aid, data.delta); scrollChat(); }
             else if (evType === 'done') {
               patchMsg(aid, { typing: false, emotion: data.emotion_tags });
+              haptic();
               S.streaming = false;
               syncSendBtn();
             } else if (evType === 'error') {
@@ -334,7 +416,12 @@ async function doSend(content) {
         }
       }
     }
-  } catch(e) { patchMsg(aid, { content: 'Connection lost. Please try again.', typing: false }); S.streaming = false; syncSendBtn(); }
+  } catch(e) {
+    patchMsg(aid, { content: 'Connection lost. Please try again.', typing: false }); S.streaming = false; syncSendBtn();
+    // The server keeps generating after a dropped stream; pick up the saved
+    // reply once it lands instead of leaving the error bubble.
+    setTimeout(refreshConv, 4000);
+  }
 }
 
 function appendMsg(id, delta) {
@@ -368,6 +455,7 @@ async function doLogout() {
   } else {
     try { await api('POST', '/v1/auth/logout'); } catch(e) {}
   }
+  await clearReminder();
   S.token = null; S.user = null; S.msgs = []; S.convId = null;
   S.memories = []; S.trends = []; S.streak = null; S.sessionJustEnded = false;
   save(); go('login');
@@ -565,9 +653,19 @@ function mainSettings() {
     '<div class="sec-head">Preferences</div>' +
     '<div class="srow"><span class="srow-lbl">Communication style</span><select class="inline" onchange="doUpdateProfile({comm_style:this.value})"><option value="warm" ' + (u.comm_style==='warm'?'selected':'') + '>Warm</option><option value="direct" ' + (u.comm_style==='direct'?'selected':'') + '>Direct</option><option value="reflective" ' + (u.comm_style==='reflective'?'selected':'') + '>Reflective</option></select></div>' +
     '<div class="srow"><span class="srow-lbl">Timezone</span><span class="srow-val">' + esc(u.timezone||'Not set') + '</span></div>' +
+    reminderRows() +
     '<div class="sec-head">App</div>' +
     '<div class="srow danger" onclick="doLogout()"><span class="srow-lbl">Sign out</span><span style="color:var(--txt3);font-size:16px">\u2192</span></div>' +
     '</div>' + bnavHTML();
+}
+
+function reminderRows() {
+  if (!isNative()) return '';
+  var p = reminderPref();
+  return '<div class="sec-head">Reminders</div>' +
+    '<label class="srow" style="cursor:pointer;text-transform:none;letter-spacing:0;margin:0;font-weight:400"><span class="srow-lbl">Daily check-in reminder</span>' +
+    '<input type="checkbox" ' + (p.on ? 'checked' : '') + ' onchange="setReminder(this.checked)"></label>' +
+    (p.on ? '<div class="srow"><span class="srow-lbl">Time</span><input type="time" value="' + esc(p.time) + '" onchange="setReminder(true, this.value)"></div>' : '');
 }
 
 function render() {
@@ -605,10 +703,11 @@ function onKey(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); 
 function autoH(el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 120) + 'px'; }
 function backMem() { S.screen = 'main'; S.nav = 'memories'; S.memDetail = null; render(); }
 
-Object.assign(window, { go, onSetup, onLogin, onRegister, onSend, onKey, autoH, switchNav, openMemory, backMem, doCloseConv, doLogout, loadMemories, loadTrends, doUpdateProfile });
+Object.assign(window, { go, onSetup, onLogin, onRegister, onSend, onKey, autoH, switchNav, openMemory, backMem, doCloseConv, doLogout, loadMemories, loadTrends, doUpdateProfile, setReminder });
 
 async function boot() {
   load();
+  initNative();
   if (!S.cfg.url) {
     S.cfg.url = 'https://ai-companion-project-production.up.railway.app';
     save();
