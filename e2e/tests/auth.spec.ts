@@ -176,8 +176,14 @@ test.describe('Navigation between auth screens', () => {
     await expect(page.locator('button.btn-p')).toContainText('Sign in');
   });
 
-  test('Change backend URL link is visible on login screen', async ({ page }) => {
+  test('Change backend URL link is hidden on login screen by default', async ({ page }) => {
     await page.goto('/');
+    await waitForScreen(page, 'login');
+    await expect(page.locator('button.lnk:has-text("Change backend URL")')).toHaveCount(0);
+  });
+
+  test('Change backend URL link is visible with ?setup', async ({ page }) => {
+    await page.goto('/?setup');
     await waitForScreen(page, 'login');
     await expect(page.locator('button.lnk:has-text("Change backend URL")')).toBeVisible();
   });
