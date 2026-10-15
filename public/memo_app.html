@@ -155,11 +155,41 @@ async function api(method, path, body, _retry = true) {
   return res;
 }
 
-async function tryRefresh() {
+// ── Refresh-token storage (#62) ──────────────────────────────────────────
+// Web: the refresh token lives only in the HttpOnly cookie. Native (iOS via
+// Capacitor): cookies don't survive cross-site in WKWebView, so the backend
+// hands the token over in the JSON body and we keep it in the Keychain via
+// the secure-storage plugin. Never written to localStorage, never logged.
+const RT_KEY = 'ami_refresh_token';
+const isNative = () => !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+const secureStore = () => window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.SecureStoragePlugin;
+async function rtGet() {
+  try { const r = await secureStore().get({ key: RT_KEY }); return (r && r.value) || null; } catch(e) { return null; }
+}
+async function rtSet(v) { try { await secureStore().set({ key: RT_KEY, value: v }); } catch(e) {} }
+async function rtClear() { try { await secureStore().remove({ key: RT_KEY }); } catch(e) {} }
+
+// Single-flight: refresh tokens rotate, so two concurrent refreshes with the
+// same token would trip the server's reuse detection and revoke the session.
+let refreshing = null;
+function tryRefresh() {
+  if (!refreshing) refreshing = doRefresh().finally(() => { refreshing = null; });
+  return refreshing;
+}
+
+async function doRefresh() {
   try {
-    const res = await fetch(base() + '/v1/auth/refresh', { method: 'POST', credentials: 'include' });
-    if (!res.ok) return false;
+    const opts = { method: 'POST', credentials: 'include' };
+    if (isNative()) {
+      const rt = await rtGet();
+      if (!rt) return false;
+      opts.headers = { 'Content-Type': 'application/json' };
+      opts.body = JSON.stringify({ refresh_token: rt });
+    }
+    const res = await fetch(base() + '/v1/auth/refresh', opts);
+    if (!res.ok) { if (isNative() && res.status === 401) await rtClear(); return false; }
     const d = await res.json();
+    if (isNative() && d.refresh_token) await rtSet(d.refresh_token);
     if (d.access_token) { S.token = d.access_token; save(); return true; }
   } catch(e) {}
   return false;
@@ -170,11 +200,13 @@ async function doLogin(email, pwd) {
   try {
     const res = await fetch(base() + '/v1/auth/login', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password: pwd }), credentials: 'include',
+      body: JSON.stringify(isNative() ? { email, password: pwd, client: 'native' } : { email, password: pwd }),
+      credentials: 'include',
     });
     let d = {};
     try { d = await res.json(); } catch(e) {}
     if (!res.ok) { S.error = codeMsg(d) || 'Login failed — please try again.'; S.loading = false; render(); return; }
+    if (isNative() && d.refresh_token) await rtSet(d.refresh_token);
     S.token = d.access_token || d.token; save();
     await loadUser(); S.loading = false; await afterAuth();
   } catch(e) { S.error = e.message; S.loading = false; render(); }
@@ -311,7 +343,13 @@ async function doCloseConv() {
 }
 
 async function doLogout() {
-  try { await api('POST', '/v1/auth/logout'); } catch(e) {}
+  if (isNative()) {
+    const rt = await rtGet();
+    if (rt) { try { await api('POST', '/v1/auth/logout', { refresh_token: rt }); } catch(e) {} }
+    await rtClear();
+  } else {
+    try { await api('POST', '/v1/auth/logout'); } catch(e) {}
+  }
   S.token = null; S.user = null; S.msgs = []; S.convId = null;
   S.memories = []; S.trends = []; S.streak = null; S.sessionJustEnded = false;
   save(); go('login');
@@ -554,7 +592,15 @@ async function boot() {
     S.cfg.url = 'https://ai-companion-project-production.up.railway.app';
     save();
   }
-  if (S.token) { S.screen = 'loading'; render(); await loadUser(); if (S.user) { await afterAuth(); return; } }
+  // Restore the session on launch. The saved access token is usually
+  // expired after a restart (15-min TTL), so fall back to one refresh. On
+  // native, a Keychain refresh token alone is enough to sign back in.
+  if (S.token || isNative()) {
+    S.screen = 'loading'; render();
+    if (S.token) await loadUser();
+    if (!S.user && await tryRefresh()) await loadUser();
+    if (S.user) { await afterAuth(); return; }
+  }
   S.screen = 'login'; render();
 }
 boot();

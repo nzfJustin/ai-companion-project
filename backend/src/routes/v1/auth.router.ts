@@ -8,9 +8,22 @@
  *   POST /v1/auth/logout              (P1-07 / TDD P1-003) ✓
  *   POST /v1/auth/memory-pin/set     (P1-09 / TDD P1-004) ✓
  *   POST /v1/auth/memory-pin/verify  (P1-09 / TDD P1-004) ✓
+ *
+ * Refresh-token transport (#62):
+ *   web    — raw refresh token travels only in the HttpOnly cookie.
+ *   native — the iOS app (Capacitor) can't rely on cookies: its origin
+ *            (capacitor://localhost) is cross-site to the API and WKWebView
+ *            blocks third-party cookies. It opts in with `client: "native"`
+ *            at login and receives the raw token in the JSON body instead;
+ *            it then sends it back as `refresh_token` in the body of
+ *            /refresh and /logout and keeps it in the iOS Keychain.
+ *   The response always mirrors the request: a token that arrived in the
+ *   body is returned in the body, a cookie token is returned as a cookie.
+ *   So a script on the web origin can never turn the HttpOnly cookie into a
+ *   readable token.
  */
 
-import { Router }  from 'express';
+import { Router, type Request } from 'express';
 import { z }       from 'zod';
 import bcrypt      from 'bcryptjs';
 import { eq, and, isNull } from 'drizzle-orm';
@@ -48,6 +61,20 @@ const BCRYPT_ROUNDS = 12;
  * if it ever needed to be computed fresh.
  */
 const DUMMY_HASH_PROMISE = bcrypt.hash('dummy-password-for-timing-safety', BCRYPT_ROUNDS);
+
+/**
+ * Reads the raw refresh token for /refresh and /logout. A non-empty
+ * `refresh_token` string in the JSON body (native clients) takes precedence
+ * over the cookie (web clients). `viaBody` tells the caller which transport
+ * to answer on.
+ */
+function readRefreshToken(req: Request): { rawToken: string | undefined; viaBody: boolean } {
+  const bodyToken = (req.body as { refresh_token?: unknown } | undefined)?.refresh_token;
+  if (typeof bodyToken === 'string' && bodyToken.length > 0) {
+    return { rawToken: bodyToken, viaBody: true };
+  }
+  return { rawToken: req.cookies?.[REFRESH_COOKIE_NAME] as string | undefined, viaBody: false };
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /v1/auth/register
@@ -121,6 +148,8 @@ const LoginSchema = z.object({
   password: z
     .string({ required_error: 'password is required' })
     .min(1, { message: 'password is required' }),
+  /** "native" = return the refresh token in the body instead of a cookie (#62). */
+  client: z.enum(['web', 'native']).optional(),
 });
 
 type LoginBody = z.infer<typeof LoginSchema>;
@@ -129,7 +158,7 @@ authRouter.post(
   '/login',
   validate(LoginSchema),
   async (req, res, next) => {
-    const { email, password } = req.body as LoginBody;
+    const { email, password, client } = req.body as LoginBody;
 
     try {
       // ── 1. Look up user ──────────────────────────────────────────────────
@@ -168,7 +197,17 @@ authRouter.post(
         expiresAt:    new Date(Date.now() + REFRESH_TOKEN_TTL_MS),
       });
 
-      // ── 5. Set HttpOnly cookie (raw token) + respond ──────────────────────
+      // ── 5. Hand the raw token to the client + respond ─────────────────────
+      // Native: in the body, for the Keychain. Web: HttpOnly cookie only.
+      if (client === 'native') {
+        return res.status(200).json({
+          access_token:  accessToken,
+          token_type:    'Bearer',
+          expires_in:    ACCESS_TOKEN_TTL_SEC,
+          refresh_token: refreshToken,
+        });
+      }
+
       res.cookie(REFRESH_COOKIE_NAME, refreshToken, refreshCookieOptions(REFRESH_TOKEN_TTL_MS));
 
       return res.status(200).json({
@@ -187,7 +226,8 @@ authRouter.post(
 // ─────────────────────────────────────────────────────────────────────────────
 //
 // Rotation scheme (TDD P1-003):
-//   1. Read raw refresh_token from cookie, hash it, look up auth_sessions.
+//   1. Read raw refresh_token from the body (native) or cookie (web), hash
+//      it, look up auth_sessions.
 //   2. If no row matches → 401 TOKEN_EXPIRED (unknown/garbage token).
 //   3. If the matched row is already revoked → this token has been used
 //      before (reuse). Revoke the ENTIRE token_family and return
@@ -195,11 +235,12 @@ authRouter.post(
 //   4. If the row is expired → 401 TOKEN_EXPIRED.
 //   5. Otherwise: in one atomic transaction, revoke the current row and
 //      insert a new row (same family, new hash, new expiry). Issue a new
-//      access token and set the new raw token as the cookie.
+//      access token and return the new raw token on the same transport it
+//      arrived on (body or cookie).
 
 authRouter.post('/refresh', async (req, res, next) => {
   try {
-    const rawToken = req.cookies?.[REFRESH_COOKIE_NAME] as string | undefined;
+    const { rawToken, viaBody } = readRefreshToken(req);
 
     if (!rawToken) {
       return next(new AppError(401, 'TOKEN_EXPIRED'));
@@ -213,7 +254,7 @@ authRouter.post('/refresh', async (req, res, next) => {
 
     // Unknown token — never issued, or already pruned
     if (!session) {
-      res.clearCookie(REFRESH_COOKIE_NAME, refreshCookieOptions(0));
+      if (!viaBody) res.clearCookie(REFRESH_COOKIE_NAME, refreshCookieOptions(0));
       return next(new AppError(401, 'TOKEN_EXPIRED'));
     }
 
@@ -232,13 +273,13 @@ authRouter.post('/refresh', async (req, res, next) => {
           ),
         );
 
-      res.clearCookie(REFRESH_COOKIE_NAME, refreshCookieOptions(0));
+      if (!viaBody) res.clearCookie(REFRESH_COOKIE_NAME, refreshCookieOptions(0));
       return next(new AppError(401, 'TOKEN_REUSE_DETECTED'));
     }
 
     // ── Expiry check ───────────────────────────────────────────────────────
     if (session.expiresAt.getTime() < Date.now()) {
-      res.clearCookie(REFRESH_COOKIE_NAME, refreshCookieOptions(0));
+      if (!viaBody) res.clearCookie(REFRESH_COOKIE_NAME, refreshCookieOptions(0));
       return next(new AppError(401, 'TOKEN_EXPIRED'));
     }
 
@@ -262,6 +303,15 @@ authRouter.post('/refresh', async (req, res, next) => {
 
     const accessToken = signAccessToken(session.userId);
 
+    if (viaBody) {
+      return res.status(200).json({
+        access_token:  accessToken,
+        token_type:    'Bearer',
+        expires_in:    ACCESS_TOKEN_TTL_SEC,
+        refresh_token: newRawToken,
+      });
+    }
+
     res.cookie(REFRESH_COOKIE_NAME, newRawToken, refreshCookieOptions(REFRESH_TOKEN_TTL_MS));
 
     return res.status(200).json({
@@ -278,12 +328,13 @@ authRouter.post('/refresh', async (req, res, next) => {
 // POST /v1/auth/logout
 // ─────────────────────────────────────────────────────────────────────────────
 //
-// Revokes the session tied to the current refresh token and clears the
-// cookie (Set-Cookie with max-age=0, per TDD P1-003).
+// Revokes the session tied to the current refresh token (body or cookie)
+// and, for cookie clients, clears the cookie (Set-Cookie with max-age=0,
+// per TDD P1-003).
 
 authRouter.post('/logout', async (req, res, next) => {
   try {
-    const rawToken = req.cookies?.[REFRESH_COOKIE_NAME] as string | undefined;
+    const { rawToken, viaBody } = readRefreshToken(req);
 
     if (!rawToken) {
       return next(new AppError(401, 'TOKEN_EXPIRED'));
@@ -296,7 +347,7 @@ authRouter.post('/logout', async (req, res, next) => {
     });
 
     if (!session || session.expiresAt.getTime() < Date.now()) {
-      res.clearCookie(REFRESH_COOKIE_NAME, refreshCookieOptions(0));
+      if (!viaBody) res.clearCookie(REFRESH_COOKIE_NAME, refreshCookieOptions(0));
       return next(new AppError(401, 'TOKEN_EXPIRED'));
     }
 
@@ -307,8 +358,9 @@ authRouter.post('/logout', async (req, res, next) => {
         .where(eq(authSessions.id, session.id));
     }
 
-    // Explicit max-age=0 — clears the cookie immediately
-    res.cookie(REFRESH_COOKIE_NAME, '', refreshCookieOptions(0));
+    // Explicit max-age=0 — clears the cookie immediately. Native clients
+    // delete their Keychain copy themselves.
+    if (!viaBody) res.cookie(REFRESH_COOKIE_NAME, '', refreshCookieOptions(0));
 
     return res.status(200).json({ success: true });
   } catch (err) {
