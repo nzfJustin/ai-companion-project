@@ -15,6 +15,7 @@ import { eq }  from 'drizzle-orm';
 import { app } from '../../app';
 import { db }  from '../../db';
 import { users, authSessions, userContext } from '../../db/schema';
+import { closeConnections } from '../../../tests/integration/closeConnections';
 
 // ─── Key pair setup ───────────────────────────────────────────────────────────
 
@@ -73,6 +74,7 @@ beforeEach(async () => {
 
 afterAll(async () => {
   await cleanupUser();
+  await closeConnections();
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

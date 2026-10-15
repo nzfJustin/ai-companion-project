@@ -16,6 +16,7 @@ import { app } from '../../app';
 import { db }  from '../../db';
 import { users, authSessions } from '../../db/schema';
 import { REFRESH_COOKIE_NAME, hashRefreshToken } from '../../lib/jwt';
+import { closeConnections } from '../../../tests/integration/closeConnections';
 
 // ─── Key pair setup ───────────────────────────────────────────────────────────
 
@@ -79,6 +80,7 @@ beforeEach(async () => {
 
 afterAll(async () => {
   await cleanupUser();
+  await closeConnections();
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
