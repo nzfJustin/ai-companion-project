@@ -5,5 +5,11 @@
   "ios": {
     "contentInset": "never",
     "scrollEnabled": false
+  },
+  "plugins": {
+    "Keyboard": {
+      "resize": "native",
+      "resizeOnFullScreen": true
+    }
   }
 }
