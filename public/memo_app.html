@@ -232,11 +232,25 @@ async function doRegister(name, email, pwd) {
 
 async function afterAuth() {
   if (!S.user) { S.screen = 'login'; render(); return; }
-  S.screen = 'main'; S.nav = 'chat'; await loadOrCreateConv(); render();
+  S.screen = 'main'; S.nav = 'chat'; await loadOrCreateConv(); render(); scrollChat();
 }
 
 async function loadUser() {
   try { const res = await api('GET', '/v1/users/me', null, false); if (res && res.ok) S.user = await res.json(); } catch(e) {}
+}
+
+// Restore the open conversation's recent messages (the API returns the
+// latest 20) so reopening the app doesn't show an empty chat (#64).
+async function loadConvMessages(id) {
+  try {
+    const res = await api('GET', '/v1/conversations/' + id);
+    if (!res || !res.ok) return;
+    const d = await res.json();
+    if (S.convId !== id) return;
+    S.msgs = (d.messages || []).map(m => ({
+      id: m.id, role: m.role === 'user' ? 'user' : 'ai', content: m.content, emotion: m.emotion_tags,
+    }));
+  } catch(e) {}
 }
 
 async function loadOrCreateConv() {
@@ -247,7 +261,7 @@ async function loadOrCreateConv() {
       const d = await res.json();
       const convs = d.conversations || d.data || (Array.isArray(d) ? d : []);
       const active = convs.find(c => c.status === 'active');
-      if (active) { S.convId = active.id; S.msgs = []; return; }
+      if (active) { S.convId = active.id; S.msgs = []; await loadConvMessages(active.id); return; }
     }
   } catch(e) {}
 
@@ -262,7 +276,7 @@ async function loadOrCreateConv() {
         const d = await res2.json();
         const convs = d.conversations || d.data || (Array.isArray(d) ? d : []);
         // Take the most recent one regardless of status
-        if (convs.length > 0) { S.convId = convs[0].id; S.msgs = []; return; }
+        if (convs.length > 0) { S.convId = convs[0].id; S.msgs = []; await loadConvMessages(convs[0].id); return; }
       }
     }
   } catch(e) {}
