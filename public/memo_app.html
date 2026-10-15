@@ -165,6 +165,7 @@ async function api(method, path, body, _retry = true) {
 // the secure-storage plugin. Never written to localStorage, never logged.
 const RT_KEY = 'ami_refresh_token';
 const isNative = () => !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+const showSetupLink = () => !isNative() && /[?&]setup(=|&|$)/.test(window.location.search);
 const secureStore = () => window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.SecureStoragePlugin;
 async function rtGet() {
   try { const r = await secureStore().get({ key: RT_KEY }); return (r && r.value) || null; } catch(e) { return null; }
@@ -472,7 +473,10 @@ var screens = {
       '<div><label>Password</label><input id="lp" type="password" placeholder="\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" autocomplete="current-password" onkeydown="if(event.key===\'Enter\')onLogin()" /></div>' +
       '<button class="btn-p" onclick="onLogin()" ' + (S.loading?'disabled':'') + '>' + (S.loading?'Signing in\u2026':'Sign in') + '</button>' +
       '<div class="divider">or</div><button class="btn-g" onclick="go(\'register\')">Create account</button>' +
-      '<div style="text-align:center;margin-top:4px"><button class="lnk" onclick="go(\'setup\')">Change backend URL</button></div></div></div>';
+      // Dev-only (#64): hidden from users; on the web, add ?setup to the URL
+      // to point the app at another backend. Never shown in the iOS app.
+      (showSetupLink() ? '<div style="text-align:center;margin-top:4px"><button class="lnk" onclick="go(\'setup\')">Change backend URL</button></div>' : '') +
+      '</div></div>';
   },
   register: function() {
     return '<div class="screen center"><div style="text-align:center"><div class="logo">am<em>i</em></div><div class="tagline">Create your account</div></div><div class="form">' +
