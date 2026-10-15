@@ -2,13 +2,16 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Ami · AI Companion</title>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; background: #FFFFFF; }
 body { display: flex; justify-content: center; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #1A1A18; }
 #root { width: 100%; max-width: 430px; min-height: 100vh; display: flex; flex-direction: column; background: #FFFFFF; position: relative; overflow: hidden; }
+/* Keep content clear of the notch / Dynamic Island and home indicator in the
+   iOS app (viewport-fit=cover). env() is 0 in normal browsers. */
+#root { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
 :root {
   --bg: #FFFFFF; --s1: #F7F7F5; --s2: #F0F0ED; --s3: #E8E8E4;
   --acc: #7C6CF0; --acc2: #5A4DD6; --acc-s: rgba(124,108,240,0.10); --acc-b: rgba(124,108,240,0.28);
