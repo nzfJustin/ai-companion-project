@@ -654,9 +654,19 @@ function mainSettings() {
     '<div class="srow"><span class="srow-lbl">Communication style</span><select class="inline" onchange="doUpdateProfile({comm_style:this.value})"><option value="warm" ' + (u.comm_style==='warm'?'selected':'') + '>Warm</option><option value="direct" ' + (u.comm_style==='direct'?'selected':'') + '>Direct</option><option value="reflective" ' + (u.comm_style==='reflective'?'selected':'') + '>Reflective</option></select></div>' +
     '<div class="srow"><span class="srow-lbl">Timezone</span><span class="srow-val">' + esc(u.timezone||'Not set') + '</span></div>' +
     reminderRows() +
+    '<div class="sec-head">About</div>' +
+    legalRow('Privacy Policy', 'privacy') + legalRow('Terms of Use', 'terms') + legalRow('Help & Support', 'support') +
     '<div class="sec-head">App</div>' +
     '<div class="srow danger" onclick="doLogout()"><span class="srow-lbl">Sign out</span><span style="color:var(--txt3);font-size:16px">\u2192</span></div>' +
     '</div>' + bnavHTML();
+}
+
+// Public pages on the website (#67). Absolute URL so the iOS app (origin
+// capacitor://localhost) opens them in Safari.
+const SITE_URL = 'https://app-ami.com';
+function legalRow(label, path) {
+  return '<a class="srow" style="text-decoration:none;cursor:pointer" href="' + SITE_URL + '/' + path + '" target="_blank" rel="noopener">' +
+    '<span class="srow-lbl">' + label + '</span><span style="color:var(--txt3);font-size:16px">\u2197</span></a>';
 }
 
 function reminderRows() {
