@@ -6,6 +6,7 @@
  *   PATCH  /v1/users/me          (P1-08 / TDD P1-005) ✓
  *   DELETE /v1/users/me          (#51) ✓
  *   GET    /v1/users/me/streak   (T-008) ✓
+ *   POST   /v1/users/me/consent  (#66) ✓
  *
  * All routes require authentication (Bearer access token).
  */
@@ -38,6 +39,8 @@ const ME_COLUMNS = {
   commStyle:      true,
   onboardingDone: true,
   createdAt:      true,
+  aiConsentAt:      true,
+  aiConsentVersion: true,
   deletedAt:      true,   // fetched only to check soft-delete, stripped before response
 } as const;
 
@@ -50,6 +53,8 @@ const ME_RETURNING = {
   commStyle:      users.commStyle,
   onboardingDone: users.onboardingDone,
   createdAt:      users.createdAt,
+  aiConsentAt:      users.aiConsentAt,
+  aiConsentVersion: users.aiConsentVersion,
   deletedAt:      users.deletedAt,
 };
 
@@ -61,6 +66,8 @@ type MeRow = {
   commStyle: string;
   onboardingDone: boolean;
   createdAt: Date;
+  aiConsentAt: Date | null;
+  aiConsentVersion: string | null;
   deletedAt: Date | null;
 };
 
@@ -79,6 +86,8 @@ function toMeResponse(user: MeRow) {
     comm_style:      user.commStyle,
     onboarding_done: user.onboardingDone,
     created_at:      user.createdAt,
+    ai_consent_at:      user.aiConsentAt,
+    ai_consent_version: user.aiConsentVersion,
   };
 }
 
@@ -263,3 +272,39 @@ usersRouter.get(
     }
   },
 );
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /v1/users/me/consent   (#66)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Records that the user agreed to the first-run AI disclosure (Ami is an AI,
+// not a therapist; conversations are processed by a third-party AI
+// provider; 18+; Privacy Policy + Terms). `version` identifies the
+// disclosure/policy text the client showed, so a later policy change can
+// re-prompt. Re-posting simply refreshes the timestamp and version.
+
+const ConsentSchema = z.object({
+  version: z
+    .string({ required_error: 'version is required' })
+    .min(1)
+    .max(40),
+});
+
+usersRouter.post('/me/consent', validate(ConsentSchema), async (req, res, next) => {
+  const { version } = req.body as z.infer<typeof ConsentSchema>;
+  try {
+    const [user] = await db
+      .update(users)
+      .set({ aiConsentAt: new Date(), aiConsentVersion: version })
+      .where(and(eq(users.id, req.userId!), isNull(users.deletedAt)))
+      .returning(ME_RETURNING);
+
+    if (!user) {
+      return next(new AppError(404, 'USER_NOT_FOUND'));
+    }
+
+    return res.status(200).json(toMeResponse(user));
+  } catch (err) {
+    return next(err);
+  }
+});

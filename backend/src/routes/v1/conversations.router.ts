@@ -9,6 +9,7 @@
  *   PATCH  /v1/conversations/:id            — close conversation
  *   GET    /v1/conversations/:id            — metadata + last 20 messages
  *   POST   /v1/conversations/:id/messages   — send message, stream AI reply (SSE)
+ *   POST   /v1/conversations/:id/messages/:messageId/report — report an AI reply (#66)
  *
  * SSE frame schema (TDD §6.3):
  *   event: token  data: { "delta": "<token>" }
@@ -27,12 +28,12 @@ import { eq, and, desc, sql } from 'drizzle-orm';
 import type PgBoss       from 'pg-boss';
 
 import { db }                from '../../db';
-import { conversations, messages, users, userContext } from '../../db/schema';
+import { conversations, messages, messageReports, users, userContext } from '../../db/schema';
 import { authenticate }      from '../../middleware/authenticate';
 import { globalRateLimit, aiRateLimit } from '../../middleware/rateLimit';
 import { validate }          from '../../middleware/validate';
 import { AppError }          from '../../lib/errors';
-import { warn }              from '../../lib/logger';
+import { log, warn }         from '../../lib/logger';
 import { EncryptionService } from '../../services/EncryptionService';
 import {
   initContextCache,
@@ -450,3 +451,56 @@ conversationsRouter.post('/:id/messages', aiRateLimit, async (req, res, next) =>
     jobQueue:              _jobQueue,
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /v1/conversations/:id/messages/:messageId/report   (#66)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// "Report a problem" on one of Ami's replies. Only the owner can report, only
+// assistant messages can be reported, and reporting the same message twice
+// is a no-op (200 instead of 201). The report stores a reason, never a copy
+// of the content.
+
+const REPORT_REASONS = ['harmful', 'inaccurate', 'inappropriate', 'other'] as const;
+const ReportSchema = z.object({ reason: z.enum(REPORT_REASONS) });
+const UuidSchema   = z.string().uuid();
+
+conversationsRouter.post(
+  '/:id/messages/:messageId/report',
+  validate(ReportSchema),
+  async (req, res, next) => {
+    const { id, messageId } = req.params;
+    const { reason } = req.body as z.infer<typeof ReportSchema>;
+
+    // Malformed ids would otherwise surface as a Postgres uuid cast error.
+    if (!UuidSchema.safeParse(id).success || !UuidSchema.safeParse(messageId).success) {
+      return next(new AppError(404, 'NOT_FOUND'));
+    }
+
+    try {
+      const msg = await db.query.messages.findFirst({
+        where:   and(eq(messages.id, messageId), eq(messages.conversationId, id)),
+        columns: { id: true, userId: true, role: true },
+      });
+
+      if (!msg || msg.userId !== req.userId) {
+        return next(new AppError(404, 'NOT_FOUND'));
+      }
+      if (msg.role !== 'assistant') {
+        return next(new AppError(400, 'ONLY_AI_MESSAGES_REPORTABLE'));
+      }
+
+      const inserted = await db
+        .insert(messageReports)
+        .values({ userId: req.userId!, messageId, reason })
+        .onConflictDoNothing()
+        .returning({ id: messageReports.id });
+
+      log({ event: 'message_reported', message_id: messageId, reason, duplicate: inserted.length === 0 });
+
+      return res.status(inserted.length ? 201 : 200).json({ reported: true });
+    } catch (err) {
+      return next(err);
+    }
+  },
+);

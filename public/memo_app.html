@@ -64,6 +64,25 @@ input::placeholder { color: var(--txt3); }
 .bubble.a { background: var(--s2); color: var(--txt); border-bottom-left-radius: 4px; }
 .bubble.typing::after { content: '\25AE'; color: var(--acc); animation: blink .7s step-end infinite; margin-left: 1px; }
 @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+.msg-meta { display: flex; align-items: center; gap: 8px; }
+.rpt-btn { background: none; border: none; color: var(--txt3); font-size: 11px; cursor: pointer; padding: 2px 0; font-family: inherit; }
+.consent { padding: 28px 24px 24px; gap: 18px; justify-content: flex-start; }
+.consent h2 { font-size: 22px; letter-spacing: -0.02em; }
+.consent ul { list-style: none; display: flex; flex-direction: column; gap: 12px; }
+.consent li { display: flex; gap: 12px; font-size: 14.5px; line-height: 1.5; color: var(--txt); }
+.consent li span:first-child { font-size: 20px; line-height: 1.2; width: 24px; flex-shrink: 0; text-align: center; }
+.consent .chk { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; line-height: 1.45; text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--txt); cursor: pointer; }
+.consent .chk input { width: 20px; height: 20px; accent-color: var(--acc); flex-shrink: 0; margin-top: 1px; }
+.consent a, .help a { color: var(--acc2); }
+.help-card { background: var(--s1); border: 1px solid var(--bdr); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; }
+.help-card b { font-size: 15px; }
+.help-card span { font-size: 13.5px; color: var(--txt2); }
+.help-card .acts { display: flex; gap: 8px; margin-top: 8px; }
+.help-card .acts a { flex: 1; text-align: center; background: var(--acc); color: #fff; border-radius: 9px; padding: 9px; font-size: 14px; font-weight: 600; text-decoration: none; }
+.sheet-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.32); display: flex; align-items: flex-end; justify-content: center; z-index: 50; }
+.sheet { background: var(--bg); width: 100%; max-width: 430px; border-radius: 16px 16px 0 0; padding: 18px 16px calc(16px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 8px; }
+.sheet-t { font-size: 16px; font-weight: 600; text-align: center; }
+.sheet-s { font-size: 13px; color: var(--txt2); text-align: center; margin-bottom: 4px; }
 .emo-pill { font-size: 10px; color: var(--txt3); padding: 2px 9px; background: var(--s1); border-radius: 99px; border: 1px solid var(--bdr); }
 .chat-input-bar { display: flex; gap: 8px; padding: 10px 14px 14px; border-top: 1px solid var(--bdr); background: var(--bg); flex-shrink: 0; }
 .chat-ta { flex: 1; background: var(--s2); border: 1px solid var(--bdr2); border-radius: 22px; padding: 10px 16px; color: var(--txt); font-size: 15px; outline: none; resize: none; font-family: inherit; line-height: 1.4; max-height: 120px; }
@@ -312,6 +331,7 @@ async function doRegister(name, email, pwd) {
 
 async function afterAuth() {
   if (!S.user) { S.screen = 'login'; render(); return; }
+  if (needsConsent()) { S.screen = 'consent'; render(); return; }
   S.screen = 'main'; S.nav = 'chat'; await loadOrCreateConv(); render(); scrollChat();
 }
 
@@ -328,7 +348,7 @@ async function loadConvMessages(id) {
     const d = await res.json();
     if (S.convId !== id) return;
     S.msgs = (d.messages || []).map(m => ({
-      id: m.id, role: m.role === 'user' ? 'user' : 'ai', content: m.content, emotion: m.emotion_tags,
+      id: m.id, serverId: m.id, role: m.role === 'user' ? 'user' : 'ai', content: m.content, emotion: m.emotion_tags,
     }));
   } catch(e) {}
 }
@@ -403,7 +423,7 @@ async function doSend(content) {
             const data = JSON.parse(t.slice(6));
             if (evType === 'token' && data.delta) { appendMsg(aid, data.delta); scrollChat(); }
             else if (evType === 'done') {
-              patchMsg(aid, { typing: false, emotion: data.emotion_tags });
+              patchMsg(aid, { typing: false, emotion: data.emotion_tags, serverId: data.message_id });
               haptic();
               S.streaming = false;
               syncSendBtn();
@@ -544,7 +564,9 @@ function msgsHTML() {
     var isU = m.role === 'user';
     var bcls = 'bubble ' + (isU ? 'u' : 'a') + (m.typing ? ' typing' : '');
     var emo = (!isU && m.emotion && m.emotion.primary) ? '<span class="emo-pill">' + esc(m.emotion.primary) + '</span>' : '';
-    return '<div class="msg ' + (isU ? 'u' : 'a') + '"><div class="' + bcls + '" id="bbl-' + m.id + '">' + esc(m.content) + '</div>' + emo + '</div>';
+    var rpt = (!isU && m.serverId && !m.typing) ? (m.reported ? '<span class="rpt-btn" style="cursor:default">Reported</span>' : '<button class="rpt-btn" onclick="openReport(\'' + m.id + '\')">Report</button>') : '';
+    var meta = (emo || rpt) ? '<div class="msg-meta">' + emo + rpt + '</div>' : '';
+    return '<div class="msg ' + (isU ? 'u' : 'a') + '"><div class="' + bcls + '" id="bbl-' + m.id + '">' + esc(m.content) + '</div>' + meta + '</div>';
   }).join('');
 }
 
@@ -554,12 +576,24 @@ function chatInput(ph) {
 
 function bnavHTML() {
   var tabs = [['chat','\uD83D\uDCAC','Chat'],['memories','\uD83E\uDDE0','Memories'],['trends','\uD83D\uDCC8','Trends'],['settings','\u2699\uFE0F','Settings']];
-  return '<nav class="bnav">' + tabs.map(function(t) { return '<button class="bnav-btn ' + (S.nav===t[0]?'on':'') + '" onclick="switchNav(\'' + t[0] + '\')"><span class="bnav-icon">' + t[1] + '</span><span>' + t[2] + '</span></button>'; }).join('') + '</nav>';
+  return '<nav class="bnav">' + tabs.map(function(t) { return '<button class="bnav-btn ' + ((S.nav===t[0]||(t[0]==='settings'&&S.nav==='help'))?'on':'') + '" onclick="switchNav(\'' + t[0] + '\')"><span class="bnav-icon">' + t[1] + '</span><span>' + t[2] + '</span></button>'; }).join('') + '</nav>';
 }
 
 var EMO_C = { joy:'#FBBF24', calm:'#34D399', sadness:'#60A5FA', anxiety:'#A78BFA', anger:'#F87171', excitement:'#FB923C' };
 
 var screens = {
+  consent: function() {
+    var n = ((S.user && S.user.display_name) || '').split(' ')[0];
+    return '<div class="screen center consent"><div><div class="logo" style="font-size:26px">am<em>i</em></div></div>' +
+      '<h2>' + (n ? 'Hi ' + esc(n) + ', before we start' : 'Before we start') + '</h2><ul>' +
+      '<li><span>\u2726</span><span><b>Ami is an AI, not a person.</b> It can misunderstand you or get things wrong.</span></li>' +
+      '<li><span>\u2661</span><span><b>Ami isn\'t a therapist or medical service.</b> For mental-health care, please talk to a qualified professional.</span></li>' +
+      '<li><span>\u2709</span><span><b>Your conversations are sent to our AI provider, Anthropic,</b> to write Ami\'s replies and memories. They\'re stored encrypted, and we never sell them or use them for ads.</span></li>' +
+      '<li><span>\u260E</span><span><b>In a crisis?</b> Call or text 988 (US) or your local emergency number. Ami can\'t help in an emergency.</span></li></ul>' +
+      '<label class="chk"><input type="checkbox" onchange="onConsentChk(this)"><span>I\'m 18 or older, and I agree to the <a href="' + SITE_URL + '/terms" target="_blank" rel="noopener">Terms of Use</a> and <a href="' + SITE_URL + '/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</span></label>' +
+      '<button class="btn-p" id="consent-btn" onclick="doConsent()" disabled>I agree</button>' +
+      '<button class="lnk" style="align-self:center;color:var(--txt3)" onclick="doLogout()">Sign out</button></div>';
+  },
   loading: function() { return '<div class="screen center"><div class="spin" style="width:34px;height:34px;border-width:3px"></div></div>'; },
   setup: function() {
     return '<div class="screen center"><div style="text-align:center"><div class="logo">am<em>i</em></div><div class="tagline">Your AI memory companion</div></div><div class="form">' +
@@ -593,6 +627,7 @@ var screens = {
     if (S.nav === 'memories') return mainMemories();
     if (S.nav === 'trends') return mainTrends();
     if (S.nav === 'settings') return mainSettings();
+    if (S.nav === 'help') return helpScreen();
     var endBtn = S.sessionJustEnded ? '' : '<button class="ico-btn" title="End session" onclick="doCloseConv()">\u2715 End</button>';
     return '<div class="topbar"><div class="topbar-t" style="font-size:20px;font-weight:700;letter-spacing:-0.03em">am<span style="color:var(--acc)">i</span></div>' + endBtn + '</div>' +
       '<div class="chat-body">' + msgsHTML() + '</div>' +
@@ -654,10 +689,65 @@ function mainSettings() {
     '<div class="srow"><span class="srow-lbl">Communication style</span><select class="inline" onchange="doUpdateProfile({comm_style:this.value})"><option value="warm" ' + (u.comm_style==='warm'?'selected':'') + '>Warm</option><option value="direct" ' + (u.comm_style==='direct'?'selected':'') + '>Direct</option><option value="reflective" ' + (u.comm_style==='reflective'?'selected':'') + '>Reflective</option></select></div>' +
     '<div class="srow"><span class="srow-lbl">Timezone</span><span class="srow-val">' + esc(u.timezone||'Not set') + '</span></div>' +
     reminderRows() +
+    '<div class="sec-head">Safety</div>' +
+    '<div class="srow" style="cursor:pointer" onclick="switchNav(\'help\')"><span class="srow-lbl">Need urgent help?</span><span style="color:var(--txt3);font-size:16px">\u2192</span></div>' +
     '<div class="sec-head">About</div>' +
+    '<div style="font-size:12.5px;color:var(--txt3);line-height:1.5;padding:2px 4px 6px">Ami is an AI companion, not a therapist or medical service, and it can make mistakes. Replies are generated by Anthropic\'s Claude.</div>' +
     legalRow('Privacy Policy', 'privacy') + legalRow('Terms of Use', 'terms') + legalRow('Help & Support', 'support') +
     '<div class="sec-head">App</div>' +
     '<div class="srow danger" onclick="doLogout()"><span class="srow-lbl">Sign out</span><span style="color:var(--txt3);font-size:16px">\u2192</span></div>' +
+    '</div>' + bnavHTML();
+}
+
+// ── AI disclosure & safety (#66) ─────────────────────────────────────────
+// Bump CONSENT_VERSION when the disclosure, Terms or Privacy Policy change
+// materially — everyone is asked to agree again on their next launch.
+const CONSENT_VERSION = '2026-10-19';
+const needsConsent = () => !!S.user && S.user.ai_consent_version !== CONSENT_VERSION;
+
+function onConsentChk(el) { const b = $('consent-btn'); if (b) b.disabled = !el.checked; }
+async function doConsent() {
+  const b = $('consent-btn'); if (b) b.disabled = true;
+  try {
+    const res = await api('POST', '/v1/users/me/consent', { version: CONSENT_VERSION });
+    if (res && res.ok) { S.user = await res.json(); await afterAuth(); return; }
+  } catch(e) {}
+  if (b) b.disabled = false;
+  showToast('Something went wrong. Please try again.');
+}
+
+const REPORT_REASONS = [['harmful', 'Harmful or unsafe'], ['inaccurate', 'Inaccurate or misleading'], ['inappropriate', 'Inappropriate'], ['other', 'Something else']];
+function openReport(id) {
+  closeSheet();
+  const bg = document.createElement('div');
+  bg.className = 'sheet-bg'; bg.id = 'sheet';
+  bg.onclick = e => { if (e.target === bg) closeSheet(); };
+  bg.innerHTML = '<div class="sheet"><div class="sheet-t">Report this reply</div>' +
+    '<div class="sheet-s">Tell us what went wrong. This helps us make Ami safer.</div>' +
+    REPORT_REASONS.map(r => '<button class="btn-g" onclick="sendReport(\'' + id + '\',\'' + r[0] + '\')">' + r[1] + '</button>').join('') +
+    '<button class="btn-g" style="border:none" onclick="closeSheet()">Cancel</button></div>';
+  document.body.appendChild(bg);
+}
+function closeSheet() { const el = $('sheet'); if (el) el.remove(); }
+async function sendReport(id, reason) {
+  closeSheet();
+  const m = S.msgs.find(x => x.id === id);
+  if (!m || !m.serverId || !S.convId) return;
+  try {
+    const res = await api('POST', '/v1/conversations/' + S.convId + '/messages/' + m.serverId + '/report', { reason });
+    if (res && res.ok) { m.reported = true; renderMsgs(); showToast('Thanks — we\'ll review it.'); return; }
+  } catch(e) {}
+  showToast('Could not send the report. Please try again.');
+}
+
+function helpScreen() {
+  return '<div class="topbar"><button class="ico-btn" onclick="switchNav(\'settings\')">\u2190 Back</button><div class="topbar-t">Need urgent help?</div><span style="width:52px"></span></div>' +
+    '<div class="settings-wrap help">' +
+    '<div style="font-size:14px;color:var(--txt2);line-height:1.5;margin-bottom:6px">Ami is an AI and can\'t help in an emergency. If you\'re thinking about harming yourself or you\'re in danger, please reach out now. You don\'t have to go through it alone.</div>' +
+    '<div class="help-card"><b>988 Suicide &amp; Crisis Lifeline</b><span>Free, confidential, 24/7 (US)</span><div class="acts"><a href="tel:988">Call 988</a><a href="sms:988">Text 988</a></div></div>' +
+    '<div class="help-card"><b>Crisis Text Line</b><span>Text HOME to 741741 (US)</span><div class="acts"><a href="sms:741741&body=HOME">Text HOME</a></div></div>' +
+    '<div class="help-card"><b>Emergency services</b><span>If you or someone else is in immediate danger</span><div class="acts"><a href="tel:911">Call 911</a></div></div>' +
+    '<div class="help-card"><b>Outside the US?</b><span>Find a free helpline in your country</span><div class="acts"><a href="https://findahelpline.com" target="_blank" rel="noopener">findahelpline.com</a></div></div>' +
     '</div>' + bnavHTML();
 }
 
@@ -713,7 +803,7 @@ function onKey(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); 
 function autoH(el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 120) + 'px'; }
 function backMem() { S.screen = 'main'; S.nav = 'memories'; S.memDetail = null; render(); }
 
-Object.assign(window, { go, onSetup, onLogin, onRegister, onSend, onKey, autoH, switchNav, openMemory, backMem, doCloseConv, doLogout, loadMemories, loadTrends, doUpdateProfile, setReminder });
+Object.assign(window, { go, onSetup, onLogin, onRegister, onSend, onKey, autoH, switchNav, openMemory, backMem, doCloseConv, doLogout, loadMemories, loadTrends, doUpdateProfile, setReminder, onConsentChk, doConsent, openReport, closeSheet, sendReport });
 
 async function boot() {
   load();
