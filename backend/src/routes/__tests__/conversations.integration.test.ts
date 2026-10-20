@@ -15,6 +15,7 @@ import { eq }  from 'drizzle-orm';
 import { app } from '../../app';
 import { db }  from '../../db';
 import { users, authSessions, userContext, conversations } from '../../db/schema';
+import { closeConnections } from '../../../tests/integration/closeConnections';
 
 // ─── Key pair setup ───────────────────────────────────────────────────────────
 
@@ -60,7 +61,7 @@ async function registerAndLogin(email: string): Promise<string> {
 }
 
 beforeEach(async () => { await cleanupUsers(); });
-afterAll(async ()  => { await cleanupUsers(); });
+afterAll(async ()  => { await cleanupUsers(); await closeConnections(); });
 
 // ─────────────────────────────────────────────────────────────────────────────
 

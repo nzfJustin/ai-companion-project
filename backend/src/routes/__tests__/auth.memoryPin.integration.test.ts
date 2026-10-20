@@ -18,9 +18,10 @@ import request from 'supertest';
 import { eq }  from 'drizzle-orm';
 import { app } from '../../app';
 import { db }  from '../../db';
-import { redis, closeRedis } from '../../lib/redis';
+import { redis } from '../../lib/redis';
 import { users, authSessions, userContext, userMemoryPins } from '../../db/schema';
 import { ELEVATED_TOKEN_SCOPE, ELEVATED_ACCESS_LEVEL } from '../../lib/jwt';
+import { closeConnections } from '../../../tests/integration/closeConnections';
 
 // ─── Key pair + Redis setup ───────────────────────────────────────────────────
 
@@ -79,7 +80,7 @@ beforeEach(async () => {
 
 afterAll(async () => {
   await cleanupUser();
-  await closeRedis();
+  await closeConnections();
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
