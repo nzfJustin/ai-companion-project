@@ -15,6 +15,13 @@
       "when": 1788721071936,
       "tag": "0001_smart_taskmaster",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1792466413623,
+      "tag": "0002_great_nomad",
+      "breakpoints": true
     }
   ]
 }

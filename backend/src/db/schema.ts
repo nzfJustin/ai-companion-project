@@ -152,6 +152,13 @@ export const users = pgTable('users', {
     .defaultNow(),
   /** Soft-delete — anonymised by deletion job, not dropped */
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  /**
+   * First-run AI disclosure consent (#66): when the user agreed, and to which
+   * version of the disclosure/policies. Null = never agreed; the client
+   * re-prompts when the version it ships differs.
+   */
+  aiConsentAt:      timestamp('ai_consent_at', { withTimezone: true }),
+  aiConsentVersion: text('ai_consent_version'),
 });
 
 // ── auth_sessions ─────────────────────────────────────────────────────────────
@@ -604,3 +611,28 @@ export const dataExports = pgTable('data_exports', {
   requestedAt: timestamp('requested_at', { withTimezone: true }).notNull().defaultNow(),
   completedAt: timestamp('completed_at', { withTimezone: true }),
 });
+
+// ── message_reports (#66) ─────────────────────────────────────────────────────
+//
+// "Report a problem" on an AI reply. One report per user per message; the
+// message content stays in `messages` (encrypted) — the report only points
+// at it.
+
+export const messageReports = pgTable(
+  'message_reports',
+  {
+    id:        uuid('id').defaultRandom().primaryKey(),
+    userId:    uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    messageId: uuid('message_id')
+      .notNull()
+      .references(() => messages.id, { onDelete: 'cascade' }),
+    /** 'harmful' | 'inaccurate' | 'inappropriate' | 'other' */
+    reason:    text('reason').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userMessageUniq: unique('message_reports_user_message_uniq').on(t.userId, t.messageId),
+  }),
+);
