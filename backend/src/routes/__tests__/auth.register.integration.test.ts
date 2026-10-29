@@ -17,6 +17,7 @@ import { eq }    from 'drizzle-orm';
 import { app }   from '../../app';
 import { db }    from '../../db';
 import { users, userContext } from '../../db/schema';
+import { closeConnections } from '../../../tests/integration/closeConnections';
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -30,6 +31,7 @@ beforeEach(async () => {
 afterAll(async () => {
   // Final cleanup
   await db.delete(users).where(eq(users.email, TEST_EMAIL));
+  await closeConnections();
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

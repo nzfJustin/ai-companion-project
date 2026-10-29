@@ -167,13 +167,16 @@ function sleep(ms: number): Promise<void> {
  * Throws LLMTimeoutError if the timeout fires first.
  */
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  const timeout = new Promise<never>((_, reject) =>
-    setTimeout(
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
       () => reject(new LLMTimeoutError(`LLM call timed out after ${ms}ms`)),
       ms,
-    ),
-  );
-  return Promise.race([promise, timeout]);
+    );
+  });
+  // Clear the timer once the race settles — otherwise every LLM call leaves
+  // a pending timeout behind (it kept Jest from exiting after the unit suite).
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 /** Writes a structured LLM log line via the shared logger. */

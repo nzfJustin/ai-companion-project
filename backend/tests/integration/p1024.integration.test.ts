@@ -43,6 +43,7 @@ import { runExtractionSweepTick } from '../../src/jobs/extractionSweep';
 import { EncryptionService } from '../../src/services/EncryptionService';
 import { AIOrchestrationService } from '../../src/ai/AIOrchestrationService';
 import { MockLLMProvider } from '../mocks/MockLLMProvider';
+import { closeConnections } from './closeConnections';
 
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -94,6 +95,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await truncateAll();
+  await closeConnections();
 });
 
 // ═════════════════════════════════════════════════════════════════════════════

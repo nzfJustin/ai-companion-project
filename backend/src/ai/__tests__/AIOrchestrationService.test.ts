@@ -299,10 +299,9 @@ describe('AIOrchestrationService.complete() — retry logic', () => {
 describe('AIOrchestrationService.complete() — timeout', () => {
   it('returns fallback when provider call exceeds timeoutMs', async () => {
     const provider: import('../llm/types').LLMProvider = {
-      // Never resolves within the tiny timeout window
-      complete: jest.fn().mockImplementation(
-        () => new Promise((resolve) => setTimeout(resolve, 5_000)),
-      ),
+      // Never settles — a pending promise with no backing timer, so nothing
+      // is left running to keep Jest alive after the suite finishes.
+      complete: jest.fn().mockImplementation(() => new Promise(() => {})),
       stream: jest.fn(),
     };
     // Very short timeout so the test doesn't wait
